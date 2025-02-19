@@ -4,7 +4,7 @@ from collections import defaultdict
 from openpyxl.styles import PatternFill
 from openpyxl.utils.dataframe import dataframe_to_rows
 
-def import_meteological_month_data(file_path):
+def import_meteorological_month_data(file_path):
     
     """ 
     月ごとに気象データを取得し、表示する関数
@@ -91,7 +91,7 @@ def import_meteological_month_data(file_path):
     # データと平均値を返す
     return meteorological_data
 
-def import_meteological_syun_data(file_path):
+def import_meteorological_syun_data(file_path):
     """ 
     旬ごとに気象データを取得し、表示する関数
     """
@@ -246,19 +246,18 @@ def calculate_correlations_and_export_with_formatting(meteorological_data, outpu
     print(f"フィルタリングされた相関行列が {output_file} に保存され、色分けが適用されました。")
 
 
-
 if __name__ == '__main__': 
     # 使用例
     
     # ファイルパス
-    file_path1 = 'resources/nandan_month_12-8.xlsx'  
-    file_path2 = 'resources/nandan_syun_12-8.xlsx'
+    file_path1 = 'resources/meteorological_data/nandan_month_12-8.xlsx'  
+    file_path2 = 'resources/meteorological_data/nandan_syun_12-8.xlsx'
 
     output_file = 'test_correlation_output.xlsx'  # 出力するエクセルファイルパス
 
     # 気象データをインポート
-    meteorological_data_month = import_meteological_month_data(file_path1)
-    meteorological_data_syun = import_meteological_syun_data(file_path2)
+    meteorological_data_month = import_meteorological_month_data(file_path1)
+    meteorological_data_syun = import_meteorological_syun_data(file_path2)
 
     # 相関行列を計算し、エクセルに出力
     # calculate_correlations_and_export_with_formatting(meteorological_data_month, output_file)
