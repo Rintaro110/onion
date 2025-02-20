@@ -2,9 +2,10 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler    
 from sklearn.preprocessing import StandardScaler    
-import statsmodels.api as sm
-from statsmodels.formula.api import ols
 from sklearn.decomposition import PCA
+
+import test_import_deseasedata as tid
+import test_import_meteorologicaldata as tim
 
 
 def merge_datasets(desease_data, meteorological_data, use_average_only=False, detect_outliers=False, z_threshold=3):
@@ -42,7 +43,7 @@ def merge_datasets(desease_data, meteorological_data, use_average_only=False, de
                 
                 if use_average_only:
                     # 平均のみを使用する場合、場所が平均でない場合はスキップ
-                    if location != '平均':
+                    if location != 'avg':
                         continue
 
                 # 結合データのレコードを作成
@@ -438,5 +439,31 @@ def filter_predictors_by_variance_and_correlation(df, target_variable='発病率
     return filtered_df
 
 
+if __name__ == '__main__':
 
+    # 使用例
+    # ファイルパス
+    syukaku_data_path = 'resources/desease_data/disease_data_syukaku.xlsx'
+    tyozou_data_path = "resources/desease_data/disease_data_tyozou.xlsx"
+    
+    month_data_path = 'resources/meteorological_data/nandan_month_12-8.xlsx'  
+    syun_data_path = 'resources/meteorological_data/nandan_syun_12-8.xlsx'
+    start_year = 1990
+    end_year = 2023
+    target_varieties = ['ターザン']  # 取得したい品種を指定
 
+    # 病害データをインポート
+    print("---------------------------------------------------")
+    syukaku_desease_data = tid.import_desease_data(syukaku_data_path, start_year=start_year, end_year=end_year, target_names=target_varieties, verbose=True)
+    tyozou_desease_data = tid.import_desease_data(tyozou_data_path, start_year=start_year, end_year=end_year, target_names=target_varieties, verbose=True)
+    print("---------------------------------------------------")
+    # 気象データをインポート
+    print("---------------------------------------------------")
+    meteorological_data_month = tim.import_meteorological_month_data(month_data_path, verbose=True)
+    meteorological_data_syun = tim.import_meteorological_syun_data(syun_data_path, verbose=True)
+    print("---------------------------------------------------")
+    # データ結合
+    print("---------------------------------------------------")
+    syukaku_syun_data = merge_datasets(syukaku_desease_data, meteorological_data_month, use_average_only=True, detect_outliers=True)
+    print("---------------------------------------------------")
+    tyozou_syun_data = merge_datasets(tyozou_desease_data, meteorological_data_syun, use_average_only=True, detect_outliers=True)
