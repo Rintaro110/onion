@@ -2,17 +2,17 @@ import pandas as pd
 import openpyxl
 from collections import defaultdict
 from openpyxl.styles import PatternFill
-from openpyxl.utils.dataframe import dataframe_to_rows
 
-def import_meteorological_month_data(file_path):
-    
+def import_meteorological_month_data(file_path, start_year=None, end_year=None, verbose=False):
     """ 
-    月ごとに気象データを取得し、表示する関数
+    月ごとに気象データを取得し、年度ごとの集計を行う関数
     """
 
     print("月別気象データを取得しています...")
+    
     # ファイルを開く
     wb = openpyxl.load_workbook(file_path)
+    print(f"ファイルを開いた: {file_path}")
     sheet = wb.active
 
     # 4行目でのラベル取得
@@ -21,16 +21,18 @@ def import_meteorological_month_data(file_path):
     # 6行目で除外する列のチェック
     excluded_labels = ['現象なし情報', '品質情報', '均質番号']
     columns_to_include = []
+    
     for idx, cell in enumerate(sheet[6][1:], start=2):  # 6行目のB列以降をチェック
         if not any(excluded_label in str(cell.value) for excluded_label in excluded_labels):
             columns_to_include.append(idx)  # 列のインデックスを保存
 
-    # フィルタリングされたラベルを保持するための新しいリストを生成
-    filtered_labels = [labels[idx-2] for idx in columns_to_include]  # 列インデックスを元にラベルをフィルタリング
+    # フィルタリングされたラベルを保持するリスト
+    filtered_labels = [labels[idx-2] for idx in columns_to_include]
 
-    # データを[ラベル][年度][年月][データ]の形で取得する辞書を初期化
-    meteorological_data_orijinal = {label: {} for label in filtered_labels}
-
+    # データを[ラベル][年度][月][データ]の形で取得する辞書
+    meteorological_data = defaultdict(lambda: defaultdict(dict))
+    years_collected = set()  # 取得した年度を記録
+    none_count = 0  # 欠損データカウント
 
     for row in range(7, sheet.max_row + 1):  # 7行目からデータが始まる
         year_month = sheet.cell(row=row, column=1).value
@@ -41,65 +43,62 @@ def import_meteorological_month_data(file_path):
         year, month = map(int, year_month.split('/'))
         fiscal_year = year if month <= 8 else year + 1
 
-        # 各ラベルについて年度をキーとする辞書を初期化
+        # 年度フィルタリング（指定された範囲内のみ取得）
+        if start_year and fiscal_year < start_year:
+            continue
+        if end_year and fiscal_year > end_year:
+            continue
+
+        years_collected.add(fiscal_year)  # 取得した年度を記録
+
         for label in filtered_labels:
-            if fiscal_year not in meteorological_data_orijinal[label]:
-                meteorological_data_orijinal[label][fiscal_year] = {}
+            if fiscal_year not in meteorological_data[label]:
+                meteorological_data[label][fiscal_year] = {}
 
         # 各ラベルのデータを取得
         for col_idx, label in zip(columns_to_include, filtered_labels):
             if month >= 12 or month <= 8:
-                if month not in meteorological_data_orijinal[label][fiscal_year]:
-                    meteorological_data_orijinal[label][fiscal_year][month] = sheet.cell(row=row, column=col_idx).value
+                if month not in meteorological_data[label][fiscal_year]:
+                    value = sheet.cell(row=row, column=col_idx).value
 
-    # 年度ごとの平均値を計算する辞書を初期化
-    averages_meteorological_data = {label: {} for label in filtered_labels}
-    meteorological_data = defaultdict(lambda: defaultdict(dict))
-    # データ集計
+                    # 空白セル（None）の処理：スキップし、スキップ情報を表示
+                    if value is None:
+                        none_count += 1
+                        """ if verbose:
+                            print(f"データスキップ: {fiscal_year}年 {month}月 ({label})") """
+                        continue  # このデータをスキップして次の処理へ
 
-    for label in filtered_labels:
-        for year, months_data in meteorological_data_orijinal[label].items():
-            valid_values = [value for value in months_data.values() if value is not None]
-            if valid_values:
-                average = sum(valid_values) / len(valid_values)
-                averages_meteorological_data[label][year] = average
-                months_data['平均'] = average  # 各年度の最後に平均値を追加
-                meteorological_data[label][year] = months_data
+                    meteorological_data[label][fiscal_year][month] = value
 
-    """ # データの一部を表示して確認
-    for label in meteorological_data:
-        print(f"\n{label}の年度ごとのデータ:")
-        for year, months_data in meteorological_data[label].items():
-            print(f"{year}年度:")
-            for month, value in months_data.items():
-                if value is not None:
-                    print(f"{month}: {value:.2f}")
-                else:
-                    print(f"{month}: None") 
+    # 取得したデータの年度範囲を表示
+    if years_collected:
+        min_year = min(years_collected)
+        max_year = max(years_collected)
+        print(f"取得されたデータの年度範囲: {min_year}年 ～ {max_year}年")
+    else:
+        print("Warning: 指定された範囲に有効なデータがありませんでした。")
 
-    for label in averages_meteorological_data:
-        print(f"\n{label}の年度ごとの平均値:")
-        for year, average in averages_meteorological_data[label].items():
-            if average is not None:
-                print(f"{year}年度: {average:.2f}")
-            else:
-                print(f"{year}年度: None")  """
-
+    if verbose:
+        print(f"labels: {filtered_labels}")
+        print(f"総データ数: {sum(len(y) for y in meteorological_data.values())}")
+        print(f"欠損データ (None) の数: {none_count}")
 
     print("気象データ取得完了。")
 
-    # データと平均値を返す
+    # データを返す
     return meteorological_data
 
-def import_meteorological_syun_data(file_path):
+
+def import_meteorological_syun_data(file_path, start_year=None, end_year=None, verbose=False):
     """ 
-    旬ごとに気象データを取得し、表示する関数
+    旬ごとに気象データを取得し、年度ごとの集計を行う関数
     """
 
     print("旬別気象データを取得しています...")
 
     # ファイルを開く
     wb = openpyxl.load_workbook(file_path)
+    print(f"ファイルを開いた: {file_path}")
     sheet = wb.active
 
     # 4行目でのラベル取得
@@ -112,11 +111,13 @@ def import_meteorological_syun_data(file_path):
         if not any(excluded_label in str(cell.value) for excluded_label in excluded_labels):
             columns_to_include.append(idx)  # 列のインデックスを保存
 
-    # フィルタリングされたラベルを保持するための新しいリストを生成
-    filtered_labels = [labels[idx-2] for idx in columns_to_include]  # 列インデックスを元にラベルをフィルタリング
+    # フィルタリングされたラベルを保持するリスト
+    filtered_labels = [labels[idx-2] for idx in columns_to_include]
 
-    # データを[ラベル][年度][月][旬][データ]の形で取得する辞書を初期化
+    # データを[ラベル][年度][月][旬][データ]の形で取得する辞書
     meteorological_data = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    years_collected = set()  # 取得した年度を記録
+    none_count = 0  # 欠損データカウント
 
     for row in range(7, sheet.max_row + 1):  # 7行目からデータが始まる
         year_month_day = sheet.cell(row=row, column=1).value
@@ -128,6 +129,14 @@ def import_meteorological_syun_data(file_path):
 
         # 会計年度の判断（9月〜翌年8月で年度を切り替える）
         fiscal_year = year if month <= 8 else year + 1
+
+        # 年度フィルタリング（指定された範囲内のみ取得）
+        if start_year and fiscal_year < start_year:
+            continue
+        if end_year and fiscal_year > end_year:
+            continue
+
+        years_collected.add(fiscal_year)  # 取得した年度を記録
 
         # 旬の判定（1〜10日が上旬、11〜20日が中旬、21〜月末が下旬）
         if day <= 10:
@@ -142,23 +151,37 @@ def import_meteorological_syun_data(file_path):
             if month not in meteorological_data[label][fiscal_year]:
                 meteorological_data[label][fiscal_year][month] = {}
 
+            # セルの値を取得
+            value = sheet.cell(row=row, column=col_idx).value
+
+            # 空白セル（None）の処理：スキップし、スキップ情報を表示
+            if value is None:
+                none_count += 1
+                """ if verbose:
+                    print(f"データスキップ: {fiscal_year}年 {month}月 ({label})") """
+                continue  # このデータをスキップして次の処理へ    
+
             # 各月の旬ごとにデータを格納
-            meteorological_data[label][fiscal_year][month][period] = sheet.cell(row=row, column=col_idx).value
+            meteorological_data[label][fiscal_year][month][period] = value
+
+    # 取得したデータの年度範囲を表示
+    if years_collected:
+        min_year = min(years_collected)
+        max_year = max(years_collected)
+        print(f"取得されたデータの年度範囲: {min_year}年 ～ {max_year}年")
+    else:
+        print("Warning: 指定された範囲に有効なデータがありませんでした。")
+
+    if verbose:
+        print(f"labels: {filtered_labels}")
+        print(f"総データ数: {sum(len(v) for y in meteorological_data.values() for m in y.values() for v in m.values())}")
+        print(f"欠損データ (None) の数: {none_count}")
 
     print("気象データ取得完了。")
 
-    # データの表示
-    """ for label, years_data in meteorological_data.items():
-        print(f"\n--- {label} ---")
-        for year, months_data in years_data.items():
-            print(f"{year}年度:")
-            for month, periods_data in months_data.items():
-                print(f"  {month}月:")
-                for period, value in periods_data.items():
-                    print(f"    {period}: {value}") """
-
     # データを返す
     return meteorological_data
+
 
 def calculate_correlations_and_export_with_formatting(meteorological_data, output_file, missing_threshold=0.2):
     """
@@ -250,14 +273,36 @@ if __name__ == '__main__':
     # 使用例
     
     # ファイルパス
-    file_path1 = 'resources/meteorological_data/nandan_month_12-8.xlsx'  
-    file_path2 = 'resources/meteorological_data/nandan_syun_12-8.xlsx'
+    month_data_path = 'resources/meteorological_data/nandan_month_12-8.xlsx'  
+    syun_data_path = 'resources/meteorological_data/nandan_syun_12-8.xlsx'
 
-    output_file = 'test_correlation_output.xlsx'  # 出力するエクセルファイルパス
-
+    start_year = 1980
+    end_year = 2020
     # 気象データをインポート
-    meteorological_data_month = import_meteorological_month_data(file_path1)
-    meteorological_data_syun = import_meteorological_syun_data(file_path2)
+    meteorological_data_month = import_meteorological_month_data(month_data_path, verbose=True)
+    meteorological_data_syun = import_meteorological_syun_data(syun_data_path, verbose=True)
 
     # 相関行列を計算し、エクセルに出力
+    # output_file = 'test_correlation_output.xlsx'  # 出力するエクセルファイルパス
     # calculate_correlations_and_export_with_formatting(meteorological_data_month, output_file)
+
+    # データの一部を表示して確認
+    """ for label in meteorological_data_month:
+        print(f"\n{label}の年度ごとのデータ:")
+        for year, months_data in meteorological_data_month[label].items():
+            print(f"{year}年度:")
+            for month, value in months_data.items():
+                if value is not None:
+                    print(f"{month}: {value:.2f}")
+                else:
+                    print(f"{month}: None") 
+
+    # データの表示
+    for label, years_data in meteorological_data_syun.items():
+        print(f"\n--- {label} ---")
+        for year, months_data in years_data.items():
+            print(f"{year}年度:")
+            for month, periods_data in months_data.items():
+                print(f"  {month}月:")
+                for period, value in periods_data.items():
+                    print(f"    {period}: {value:.2f}")  """
