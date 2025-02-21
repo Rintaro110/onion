@@ -3,10 +3,11 @@ from collections import defaultdict
 
 def import_desease_data(file_path, start_year=None, end_year=None, target_names=["ターザン", "もみじ3号", "もみじの輝"], verbose=False):
     # Excelファイルを読み込む
+    print("---------------------------------------------------")
     df = pd.read_excel(file_path)
-    if verbose:
-        print(f"データ読み込み完了: {file_path}")
-        print(f"品種: {target_names}")
+    
+    print(f"データ読み込み完了: {file_path}")
+    print(f"品種: {target_names}")
 
     # エラーハンドリング
     # 必要なカラムチェック
@@ -52,6 +53,7 @@ def import_desease_data(file_path, start_year=None, end_year=None, target_names=
         print("Warning: 指定された範囲に有効なデータがありませんでした。")
 
     print("病害データ取得完了。")
+    print("---------------------------------------------------")
 
     return organized_data
 
