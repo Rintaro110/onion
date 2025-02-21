@@ -7,7 +7,7 @@ def import_meteorological_month_data(file_path, start_year=None, end_year=None, 
     """ 
     月ごとに気象データを取得し、年度ごとの集計を行う関数
     """
-
+    print("---------------------------------------------------")
     print("月別気象データを取得しています...")
     
     # ファイルを開く
@@ -84,7 +84,7 @@ def import_meteorological_month_data(file_path, start_year=None, end_year=None, 
         print(f"欠損データ (None) の数: {none_count}")
 
     print("気象データ取得完了。")
-
+    print("---------------------------------------------------")
     # データを返す
     return meteorological_data
 
@@ -93,7 +93,7 @@ def import_meteorological_syun_data(file_path, start_year=None, end_year=None, v
     """ 
     旬ごとに気象データを取得し、年度ごとの集計を行う関数
     """
-
+    print("---------------------------------------------------")
     print("旬別気象データを取得しています...")
 
     # ファイルを開く
@@ -178,7 +178,7 @@ def import_meteorological_syun_data(file_path, start_year=None, end_year=None, v
         print(f"欠損データ (None) の数: {none_count}")
 
     print("気象データ取得完了。")
-
+    print("---------------------------------------------------")
     # データを返す
     return meteorological_data
 
