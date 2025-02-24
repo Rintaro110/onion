@@ -67,20 +67,27 @@ if __name__ == '__main__':
 
 
     # 回帰分析
-    """ best_models, best_predictors_list, df_final = ad.perfoem_multiple_regression_summation(
+    """ best_models, best_predictors_list, df_final = ad.run_regression_analysis(
         syukaku_syun_data, 
+        method = 'exhaustive',
         top_n=2, 
         max_k=3, 
         cpu_count=mp.cpu_count()-2
-    ) """
+    )
 
-    best_models, best_predictors_list, df_final = ad.perform_stepwise_multiple_regression(
+    best_models, best_predictors_list, df_final = ad.run_regression_analysis(
         syukaku_syun_data, 
+        method = 'stepwise',
         labels = labels_tyozou, 
         top_n=2, 
         max_k=None, 
-        n_trials=2, 
-        random_seed=42
+        n_trials=2
+    ) """
+
+    best_models, best_predictors_list, df_final = ad.run_regression_analysis(
+        syukaku_syun_data, 
+        method = 'normal',
+        predictors = labels_tyozou, 
     )
 
 

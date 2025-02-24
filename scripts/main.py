@@ -6,6 +6,8 @@ import output_results as op
 import multiprocessing as mp
 
 
+
+
 if __name__ == '__main__':
 
     # 使用例
@@ -22,6 +24,10 @@ if __name__ == '__main__':
         '平均気温(℃)',
         '日最高気温の平均(℃)',
         '日最低気温の平均(℃)',
+    ]
+    labels_tyozou = [
+        '平均気温(℃)_1_上旬',
+        '日最低気温の平均(℃)_1_上旬'
     ]
     exclde_strings = [
             '_8',
@@ -45,7 +51,7 @@ if __name__ == '__main__':
         z_threshold=3, 
         threshold_ratio=0.3, 
         exclude_strings = exclde_strings,
-        include_strings= labels,
+        include_strings = labels,
         output_file="outputs/merged_syukaku_syun_data.csv"
     )
 
@@ -61,25 +67,43 @@ if __name__ == '__main__':
 
 
     # 回帰分析
-    best_models, best_predictors_list, best_X, final_df = ad.perfoem_multiple_regression_analysis(
+    """ best_models, best_predictors_list, df_final = ad.run_regression_analysis(
         syukaku_syun_data, 
+        method = 'exhaustive',
         top_n=2, 
         max_k=3, 
         cpu_count=mp.cpu_count()-2
     )
 
+    best_models, best_predictors_list, df_final = ad.run_regression_analysis(
+        syukaku_syun_data, 
+        method = 'stepwise',
+        labels = labels_tyozou, 
+        top_n=2, 
+        max_k=None, 
+        n_trials=2
+    ) """
+
+    best_models, best_predictors_list, df_final = ad.run_regression_analysis(
+        syukaku_syun_data, 
+        method = 'normal',
+        predictors = labels_tyozou, 
+    )
+
+
     # 保存とプロット
     op.save_results_to_excel(best_models, best_predictors_list, filename="regression_results.xlsx", folder="outputs")
 
+
     op.plot_multiple_regression(
         best_models,    
-        final_df,
+        df_final,
         filename_prefix="multiple_regression_plot", 
         folder="outputs", 
         show_years=True)
     
     op.plot_explanatory_vs_target(
-        final_df, 
+        df_final, 
         filename_prefix="explanatory_vs_target", 
         folder="outputs", 
     )
