@@ -85,16 +85,17 @@ def import_meteorological_month_data(file_path, start_year=None, end_year=None, 
 
     print("気象データ取得完了。")
     print("---------------------------------------------------")
+
     # データを返す
     return meteorological_data
-
 
 def import_meteorological_syun_data(file_path, start_year=None, end_year=None, verbose=False):
     """ 
     旬ごとに気象データを取得し、年度ごとの集計を行う関数
     """
-    print("---------------------------------------------------")
+
     print("旬別気象データを取得しています...")
+    print("---------------------------------------------------")
 
     # ファイルを開く
     wb = openpyxl.load_workbook(file_path)
@@ -179,9 +180,9 @@ def import_meteorological_syun_data(file_path, start_year=None, end_year=None, v
 
     print("気象データ取得完了。")
     print("---------------------------------------------------")
+
     # データを返す
     return meteorological_data
-
 
 def calculate_correlations_and_export_with_formatting(meteorological_data, output_file, missing_threshold=0.2):
     """

@@ -5,9 +5,9 @@ def import_desease_data(file_path, start_year=None, end_year=None, target_names=
     # Excelファイルを読み込む
     print("---------------------------------------------------")
     df = pd.read_excel(file_path)
-    if verbose:
-        print(f"データ読み込み完了: {file_path}")
-        print(f"品種: {target_names}")
+    
+    print(f"データ読み込み完了: {file_path}")
+    print(f"品種: {target_names}")
 
     # エラーハンドリング
     # 必要なカラムチェック

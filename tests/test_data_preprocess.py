@@ -4,8 +4,6 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.preprocessing import StandardScaler    
 from sklearn.decomposition import PCA
 
-import test_import_deseasedata as tid
-import test_import_meteorologicaldata as tim
 
 def merge_datasets(desease_data, meteorological_data, use_average_only=False):
     """
@@ -157,7 +155,7 @@ def save_dataframe_to_csv(df, filename="merged_data.csv", index=False, verbose=T
     try:
         df.to_csv(filename, index=index, encoding='utf-8-sig')
         if verbose:
-            print(f"データフレームをCSVとして保存しました: {filename}")
+            print(f"Success:データフレームをCSVとして保存しました: {filename}")
             print(f"最終的なデータフレームの形状: {df.shape}")
     except Exception as e:
         print(f"Error CSVの保存に失敗しました: {e}")
@@ -258,44 +256,3 @@ def preprocess_data(
 
     return result_df
 
-
-if __name__ == '__main__':
-
-    # 使用例
-    # ファイルパス
-    syukaku_data_path = 'resources/desease_data/disease_data_syukaku.xlsx'
-    tyozou_data_path = "resources/desease_data/disease_data_tyozou.xlsx"
-    
-    month_data_path = 'resources/meteorological_data/nandan_month_12-8.xlsx'  
-    syun_data_path = 'resources/meteorological_data/nandan_syun_12-8.xlsx'
-    start_year = 1990
-    end_year = 2023
-    target_varieties = ['ターザン']  # 取得したい品種を指定
-
-    # 病害データをインポート
-    syukaku_desease_data = tid.import_desease_data(syukaku_data_path, start_year=start_year, end_year=end_year, target_names=target_varieties, verbose=True)
-    tyozou_desease_data = tid.import_desease_data(tyozou_data_path, start_year=start_year, end_year=end_year, target_names=target_varieties, verbose=True)
-    # 気象データをインポート
-    meteorological_data_month = tim.import_meteorological_month_data(month_data_path, verbose=True)
-    meteorological_data_syun = tim.import_meteorological_syun_data(syun_data_path, verbose=True)
-
-    # データ結合
-    syukaku_syun_data = preprocess_data(
-        syukaku_desease_data, 
-        meteorological_data_syun, 
-        use_average_only=True, 
-        detect_outliers=True, 
-        z_threshold=3, 
-        threshold_ratio=0.3, 
-        output_file="outputs/test_merged_syukaku_syun_data.csv"
-    )
-
-    tyozou_syun_data = preprocess_data(
-        tyozou_desease_data, 
-        meteorological_data_syun, 
-        use_average_only=True, 
-        detect_outliers=True, 
-        z_threshold=3, 
-        threshold_ratio=0.3, 
-        output_file="outputs/test_merged_tyozou_syun_data.csv"
-    )
