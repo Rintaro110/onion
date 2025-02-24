@@ -33,19 +33,6 @@ import statsmodels.api as sm
 
 
 
-
-def summarize_data(df):
-    # データフレームの最初の10行を表示
-    print("\nデータフレームの最初の10行:")
-    print(df.head(10))
-
-    # データフレームのカラムとそのデータ型を表示
-    print("\nデータフレームのカラムとデータ型:")
-    print(df.dtypes)
-
-    # 返り値としてデータフレームをそのまま返す
-    return df
-
 def calculate_vif(X):
     """VIFを計算し、10を超えるVIFがあるかどうかを返し、VIFが高い列のリストを返す。"""
     
