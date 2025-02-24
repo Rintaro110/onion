@@ -2,11 +2,15 @@ et_xmlfile==2.0.0
 joblib==1.4.2
 numpy==2.2.3
 openpyxl==3.1.5
+packaging==24.2
 pandas==2.2.3
+patsy==1.0.1
 python-dateutil==2.9.0.post0
 pytz==2025.1
 scikit-learn==1.6.1
 scipy==1.15.2
 six==1.17.0
+statsmodels==0.14.4
 threadpoolctl==3.5.0
+tqdm==4.67.1
 tzdata==2025.1

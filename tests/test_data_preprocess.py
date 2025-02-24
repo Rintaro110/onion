@@ -157,18 +157,62 @@ def save_dataframe_to_csv(df, filename="merged_data.csv", index=False, verbose=T
     try:
         df.to_csv(filename, index=index, encoding='utf-8-sig')
         if verbose:
-            print(f"Success:データフレームをCSVとして保存しました: {filename}")
+            print(f"データフレームをCSVとして保存しました: {filename}")
             print(f"最終的なデータフレームの形状: {df.shape}")
     except Exception as e:
         print(f"Error CSVの保存に失敗しました: {e}")
 
-def preprocess_data(desease_data, 
-                    meteorological_data,
-                    use_average_only=False, 
-                    detect_outliers=False, 
-                    z_threshold=3,
-                    threshold_ratio=0.3,
-                    output_file="outputs/merged_data.csv"):
+def filter_predictors(df, exclude_strings=None, include_strings=None):
+    """
+    特定の条件でカラムを除外または選択し、基本ラベル ['品種', '年度', '場所', '発病率'] を先頭に配置する。
+
+    :param df: DataFrame
+    :param exclude_strings: 除外するカラム名に部分一致する文字列のリスト
+    :param include_strings: 選択するカラム名に部分一致する文字列のリスト
+    :return: フィルタリング後のDataFrame
+    """
+
+    # 必ず含める基本ラベル（順序を維持）
+    base_labels = ['品種', '年度', '場所', '発病率']
+    
+    # データフレーム内に存在する基本ラベルのみを取得
+    existing_base_labels = [col for col in base_labels if col in df.columns]
+
+    # すべてのカラムを取得
+    predictors = df.columns.tolist()
+
+    # 除外リストの適用
+    if exclude_strings:
+        predictors = [col for col in predictors if not any(ex_string in col for ex_string in exclude_strings)]
+        print(f"除外されたカラム: {exclude_strings}")
+    else:
+        print("除外されたカラムはありません。")
+
+    # 選択リストの適用
+    if include_strings:
+        predictors = [col for col in predictors if any(in_string in col for in_string in include_strings)]
+        print(f"選択されたカラム: {include_strings}")
+    else:
+        print("選択されたカラムはありません。")
+
+    # 残りのカラム（基本ラベルを除外したもの）
+    other_columns = [col for col in predictors if col not in existing_base_labels]
+
+    # 新しいカラム順（基本ラベルを先頭に配置）
+    final_predictors = existing_base_labels + other_columns
+
+    return df[final_predictors]  # フィルタリング後のDataFrameを返す
+
+def preprocess_data(
+        desease_data, 
+        meteorological_data,
+        use_average_only=False, 
+        detect_outliers=False, 
+        z_threshold=3,
+        threshold_ratio=0.3,
+        exclude_strings=None, 
+        include_strings=None,
+        output_file="outputs/merged_data.csv"):
     
     """ 
     発病率データと気象データを統合し、データクレンジングを行う
@@ -179,6 +223,10 @@ def preprocess_data(desease_data,
         use_average_only (bool): 平均のみを使用するかどうか
         detect_outliers (bool): 外れ値を検出して除外するかどうか
         z_threshold (int): Zスコアのしきい値    
+        threshold_ratio (float): 欠損値の許容割合
+        exclude_strings (list): 除外するカラム名に部分一致する文字列のリスト
+        include_strings (list): 選択するカラム名に部分一致する文字列のリスト
+        output_file (str): 出力ファイル名
     
     Returns:
         pd.DataFrame: 統合されたデータフレーム
@@ -195,7 +243,11 @@ def preprocess_data(desease_data,
     # 外れ値検出＆除外
     print("---------------------------------------------------")
     if detect_outliers:
-        result_df = detect_and_remove_outliers(dropped_df, target_variable = "発病率", z_threshold = z_threshold)
+        outliered_df = detect_and_remove_outliers(dropped_df, target_variable = "発病率", z_threshold = z_threshold)
+
+    # 説明変数の事前選択
+    print("---------------------------------------------------")
+    result_df = filter_predictors(outliered_df, exclude_strings=exclude_strings, include_strings=include_strings)
     
     # データフレームをCSVに保存
     print("---------------------------------------------------")
@@ -205,331 +257,6 @@ def preprocess_data(desease_data,
     print("---------------------------------------------------")
 
     return result_df
-
-
-
-def filter_predictors(df, exclude_strings=None, include_strings=None):
-    """
-    特定の条件でカラムを除外または選択する。
-
-    :param df: DataFrame
-    :param exclude_strings: 除外するカラム名に部分一致する文字列のリスト
-    :param include_strings: 選択するカラム名に部分一致する文字列のリスト
-    :return: フィルタリング後のカラムリスト
-    """
-
-    # 基本除外ラベルを先にフィルタリング
-    predictors = [col for col in df.columns if col not in ['発病率', '品種', '年度', '場所']]
-    
-    
-    if exclude_strings:
-        # exclude_stringsに部分一致するものを除外
-        predictors = [col for col in predictors if not any(ex_string in col for ex_string in exclude_strings)]
-    
-    if include_strings:
-        # include_stringsに部分一致するもののみを選択
-        filtered_predictors = []
-        for col in predictors:
-            if any(in_string in col for in_string in include_strings):
-                filtered_predictors.append(col)
-        predictors = filtered_predictors
-
-    return predictors
-
-def normalize_data(df):
-    """
-    正規化を行う関数。
-    データフレーム内の全ての数値列を0から1の範囲にスケーリングする。
-
-    Args:
-        df (pd.DataFrame): データフレーム。
-
-    Returns:
-        pd.DataFrame: 正規化後のデータフレーム。
-    """
-    # 数値列のみを対象にフィルタリング
-    numeric_columns = df.select_dtypes(include=['number']).columns
-
-    # 除外するラベルを設定し、数値列から除外
-    exclude_columns = ['発病率', '品種', '年度', '場所']
-    target_columns = [col for col in numeric_columns if col not in exclude_columns]
-
-    # MinMaxScalerを適用
-    scaler = MinMaxScaler()
-    df[target_columns] = scaler.fit_transform(df[target_columns])
-
-    print("すべての対象列の正規化を実行しました。")
-    return df
-
-def standardize_data(df):
-    """
-    標準化を行う関数。
-    指定された列の値を平均0、標準偏差1にスケーリングする。
-
-    Args:
-        df (pd.DataFrame): データフレーム。
-        columns (list): 標準化する列のリスト。
-
-    Returns:
-        pd.DataFrame: 標準化後のデータフレーム。
-    """
-
-
-   # 数値列のみを対象にフィルタリング
-    numeric_columns = df.select_dtypes(include=['number']).columns
-
-    # 基本除外ラベルを先にフィルタリング
-    exclude_columns = ['発病率', '品種', '年度', '場所']
-    target_columns = [col for col in numeric_columns if col not in exclude_columns]
-
-    # 標準化を実行
-
-    scaler = StandardScaler()
-    df[target_columns] = scaler.fit_transform(df[target_columns])
-
-    print("標準化を実行しました。")
-    return df
-
-def select_and_filter_predictors(df, target_variable='発病率', correlation_threshold=0.8, exclude_strings=None, include_strings=None, output_file="high_correlation_pairs.xlsx"):
-    """
-    説明変数の相関行列と文字列条件に基づいて、特定の説明変数を選択し、相関が高いペアを
-    目的変数との相関に基づいて絞り込む関数。高相関ペアをエクセルに出力する。
-
-    Parameters:
-        df (DataFrame): 説明変数と目的変数を含むデータフレーム
-        target_variable (str): 目的変数の列名（デフォルトは "発病率"）
-        correlation_threshold (float): 説明変数の相関係数のしきい値（デフォルトは0.8）
-        exclude_strings (list, optional): 除外するカラム名に部分一致する文字列のリスト
-        include_strings (list, optional): 選択するカラム名に部分一致する文字列のリスト
-        output_file (str): 高相関ペアを出力するエクセルファイルのパス（デフォルトは"high_correlation_pairs.xlsx"）
-
-    Returns:
-        selected_predictors (list): 絞り込まれた説明変数のリスト
-    """
-
-    # 特定の条件に基づいてカラムをフィルタリング
-    predictors = [col for col in df.columns if col not in [target_variable, '品種', '年度', '場所']]
-    
-    # 除外する文字列が指定されている場合、該当するカラムを除外
-    if exclude_strings:
-        predictors = [col for col in predictors if not any(ex_string in col for ex_string in exclude_strings)]
-    
-    # 選択する文字列が指定されている場合、該当するカラムのみを選択
-    if include_strings:
-        filtered_predictors = [col for col in predictors if any(in_string in col for in_string in include_strings)]
-        predictors = filtered_predictors
-
-    # 目的変数を除いた説明変数のデータフレーム
-    predictors_df = df[predictors].select_dtypes(include=[float, int])
-
-    # 説明変数間の相関行列を計算
-    correlation_matrix = predictors_df.corr()
-
-    # 高相関の変数ペアを格納するためのリスト
-    high_correlation_pairs = []
-
-    # 相関行列から高相関ペアを抽出
-    for i in range(len(correlation_matrix.columns)):
-        for j in range(i + 1, len(correlation_matrix.columns)):
-            corr_value = correlation_matrix.iloc[i, j]
-            if abs(corr_value) >= correlation_threshold:
-                var1 = correlation_matrix.columns[i]
-                var2 = correlation_matrix.columns[j]
-                high_correlation_pairs.append((var1, var2, corr_value))
-
-    print("高相関ペア:")
-    for pair in high_correlation_pairs:
-        print(f"{pair[0]} と {pair[1]} の相関: {pair[2]}")
-
-    # 高相関ペアをエクセルに出力
-    if high_correlation_pairs:
-        high_corr_df = pd.DataFrame(high_correlation_pairs, columns=['Variable 1', 'Variable 2', 'Correlation'])
-        
-        # Excelファイルに書き込む
-        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            high_corr_df.to_excel(writer, sheet_name="High Correlation Pairs", index=False)
-        print(f"高相関ペアが {output_file} に保存されました。")
-
-    # 目的変数と説明変数の相関係数を計算
-    target_correlation = df[[target_variable] + list(predictors_df.columns)].corr()[target_variable].drop(target_variable)
-
-    # 高相関ペアから、目的変数との相関がより高い変数を残す
-    variables_to_drop = set()
-    for var1, var2, _ in high_correlation_pairs:
-        if abs(target_correlation[var1]) >= abs(target_correlation[var2]):
-            variables_to_drop.add(var2)  # var1の相関が高ければvar2を削除
-        else:
-            variables_to_drop.add(var1)  # var2の相関が高ければvar1を削除
-
-    # 残す変数リストを作成
-    selected_predictors = [var for var in predictors_df.columns if var not in variables_to_drop]
-
-    print("\n選択された説明変数:")
-    print(selected_predictors)
-
-    return selected_predictors
-
-def perform_pca_and_select_predictors(df, target_variable='発病率', exclude_strings=None, include_strings=None, n_components=None, output_file="pca_results.xlsx"):
-    """
-    説明変数の選択とPCAによる次元削減を行い、主成分をエクセルに出力し、主成分を説明変数として返す関数。
-
-    Parameters:
-        df (DataFrame): 説明変数と目的変数を含むデータフレーム
-        target_variable (str): 目的変数の列名（デフォルトは "発病率"）
-        exclude_strings (list, optional): 除外するカラム名に部分一致する文字列のリスト
-        include_strings (list, optional): 選択するカラム名に部分一致する文字列のリスト
-        n_components (int, optional): PCAの主成分数（デフォルトはNoneで、分散の80%以上を説明するよう設定）
-        output_file (str): PCAの結果を出力するエクセルファイルのパス（デフォルトは "pca_results.xlsx"）
-
-    Returns:
-        df (DataFrame): 元のデータフレームに主成分を追加したもの
-        selected_predictors (list): 主成分の名前をリストとして返す
-    """
-    # 特定の条件に基づいてカラムをフィルタリング
-    predictors = [col for col in df.columns if col not in [target_variable, '品種', '年度', '場所']]
-    
-    if exclude_strings:
-        predictors = [col for col in predictors if not any(ex_string in col for ex_string in exclude_strings)]
-    
-    if include_strings:
-        predictors = [col for col in predictors if any(in_string in col for in_string in include_strings)]
-
-    # 説明変数のデータフレームを作成（数値型のカラムのみ）
-    predictors_df = df[predictors].select_dtypes(include=[float, int])
-
-    if predictors_df.empty:
-        raise ValueError("No valid predictors after filtering. Check exclude/include conditions and data.")
-
-    # 標準化を適用
-    scaler = StandardScaler()
-    predictors_scaled = scaler.fit_transform(predictors_df)
-
-    # PCAを実行
-    pca = PCA(n_components=n_components if n_components else 0.9)
-    pca_transformed = pca.fit_transform(predictors_scaled)
-    pca_df = pd.DataFrame(pca_transformed, columns=[f'PC{i+1}' for i in range(pca_transformed.shape[1])], index=predictors_df.index)
-
-    # 主成分の分散比率、累積分散比率、主成分負荷行列を計算
-    explained_variance_ratio = pca.explained_variance_ratio_
-    cumulative_variance_ratio = np.cumsum(explained_variance_ratio)
-    loading_matrix = pd.DataFrame(pca.components_, columns=predictors_df.columns, index=[f'PC{i+1}' for i in range(len(pca.components_))])
-
-    print("\n主成分の分散比率:", explained_variance_ratio)
-    print("累積分散比率:", cumulative_variance_ratio)
-    print("\n主成分負荷行列:\n", loading_matrix)
-
-    # 主成分を元のデータフレームに追加
-    df = pd.concat([df, pca_df], axis=1)
-
-    # 主成分名をリストとして返す
-    selected_predictors = list(pca_df.columns)
-
-    print("\n選択された説明変数 (主成分):")
-    print(selected_predictors)
-
-    # PCA結果をエクセルに出力
-    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-        # 主成分データフレームを保存
-        pca_df.to_excel(writer, sheet_name="PCA Components", index=True)
-
-        # 分散比率を保存
-        variance_df = pd.DataFrame({
-            "Principal Component": [f'PC{i+1}' for i in range(len(explained_variance_ratio))],
-            "Explained Variance Ratio": explained_variance_ratio,
-            "Cumulative Explained Variance": cumulative_variance_ratio
-        })
-        variance_df.to_excel(writer, sheet_name="Explained Variance", index=False)
-
-        # 主成分負荷行列を保存
-        loading_matrix.to_excel(writer, sheet_name="Loading Matrix", index=True)
-
-    print(f"PCAの結果が {output_file} に保存されました。")
-
-    return df, selected_predictors
-
-def filter_predictors_by_variance_and_correlation(df, target_variable='発病率', exclude_strings=None, include_strings=None, variance_threshold=0.01, correlation_threshold=0.2, output_file="filtered_predictors.xlsx"):
-    """
-    各説明変数の分散分析と目的変数との相関分析を行い、分散が小さく、かつ目的変数との相関が小さい変数を除外する関数。
-
-    Parameters:
-        df (DataFrame): 説明変数と目的変数を含むデータフレーム
-        target_variable (str): 目的変数の列名（デフォルトは "発病率"）
-        variance_threshold (float): 分散のしきい値（この値以下の分散の変数は除外）
-        correlation_threshold (float): 相関係数のしきい値（この値以下の相関の変数は除外）
-        output_file (str): フィルタリング結果を出力するエクセルファイルのパス（デフォルトは "filtered_predictors.xlsx"）
-
-    Returns:
-        filtered_df (DataFrame): フィルタリング後のデータフレーム
-        removed_predictors (list): 除外された説明変数のリスト
-    """
-    # 特定の条件に基づいてカラムをフィルタリング
-    predictors = [col for col in df.columns if col not in [target_variable, '品種', '年度', '場所']]
-    
-    # 除外する文字列が指定されている場合、該当するカラムを除外
-    if exclude_strings:
-        predictors = [col for col in predictors if not any(ex_string in col for ex_string in exclude_strings)]
-    
-    # 選択する文字列が指定されている場合、該当するカラムのみを選択
-    if include_strings:
-        predictors = [col for col in predictors if any(in_string in col for in_string in include_strings)]
-
-    # 目的変数を除いた説明変数のデータフレーム
-    predictors_df = df[predictors].select_dtypes(include=[float, int])
-    
-    # 各変数の分散を計算
-    variances = predictors_df.var()
-    
-    # 目的変数との相関を計算
-    correlations = predictors_df.corrwith(df[target_variable])
-    
-    # 分散が基準値以下、かつ目的変数との相関がしきい値以下の変数を選択
-    removed_predictors = variances[(variances <= variance_threshold) & (correlations.abs() <= correlation_threshold)].index.tolist()
-    
-    # 上記条件を満たさない変数（残す変数）を選択
-    filtered_predictors = [col for col in predictors if col not in removed_predictors]
-
-    # 結果をデータフレームで保存
-    filtered_df = df[filtered_predictors + [target_variable]]
-    
-    # 取り除かれた変数の分散と相関を取得
-    removed_variances = variances.loc[removed_predictors]
-    removed_correlations = correlations.loc[removed_predictors]
-
-    # 結果をエクセルに保存
-    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-        # 各変数の分散を保存
-        variance_df = pd.DataFrame({
-            "Predictor": variances.index,
-            "Variance": variances.values
-        }).sort_values(by="Variance", ascending=False)
-        variance_df.to_excel(writer, sheet_name="Variance Analysis", index=False)
-        
-        # 各変数と目的変数の相関を保存
-        correlation_df = pd.DataFrame({
-            "Predictor": correlations.index,
-            "Correlation with Target": correlations.values
-        }).sort_values(by="Correlation with Target", ascending=False)
-        correlation_df.to_excel(writer, sheet_name="Correlation Analysis", index=False)
-        
-        # フィルタリングされた変数を保存
-        filtered_predictors_df = pd.DataFrame({
-            "Predictor": filtered_predictors
-        })
-        filtered_predictors_df.to_excel(writer, sheet_name="Filtered Predictors", index=False)
-        
-        # 除外された変数の分散と相関を保存
-        removed_predictors_df = pd.DataFrame({
-            "Removed Predictor": removed_predictors,
-            "Variance": removed_variances.values,
-            "Correlation with Target": removed_correlations.values
-        })
-        removed_predictors_df.to_excel(writer, sheet_name="Removed Predictors", index=False)
-        
-    print(f"フィルタリング結果が {output_file} に保存されました。")
-    print(f"除外された説明変数とその詳細:")
-    print(removed_predictors_df)
-    
-    return filtered_df
 
 
 if __name__ == '__main__':

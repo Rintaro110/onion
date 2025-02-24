@@ -4,8 +4,6 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.preprocessing import StandardScaler    
 from sklearn.decomposition import PCA
 
-import import_deseasedata as tid
-import import_meteorologicaldata as tim
 
 def merge_datasets(desease_data, meteorological_data, use_average_only=False):
     """
@@ -162,13 +160,57 @@ def save_dataframe_to_csv(df, filename="merged_data.csv", index=False, verbose=T
     except Exception as e:
         print(f"Error CSVの保存に失敗しました: {e}")
 
-def preprocess_data(desease_data, 
-                    meteorological_data,
-                    use_average_only=False, 
-                    detect_outliers=False, 
-                    z_threshold=3,
-                    threshold_ratio=0.3,
-                    output_file="outputs/merged_data.csv"):
+def filter_predictors(df, exclude_strings=None, include_strings=None):
+    """
+    特定の条件でカラムを除外または選択し、基本ラベル ['品種', '年度', '場所', '発病率'] を先頭に配置する。
+
+    :param df: DataFrame
+    :param exclude_strings: 除外するカラム名に部分一致する文字列のリスト
+    :param include_strings: 選択するカラム名に部分一致する文字列のリスト
+    :return: フィルタリング後のDataFrame
+    """
+
+    # 必ず含める基本ラベル（順序を維持）
+    base_labels = ['品種', '年度', '場所', '発病率']
+    
+    # データフレーム内に存在する基本ラベルのみを取得
+    existing_base_labels = [col for col in base_labels if col in df.columns]
+
+    # すべてのカラムを取得
+    predictors = df.columns.tolist()
+
+    # 除外リストの適用
+    if exclude_strings:
+        predictors = [col for col in predictors if not any(ex_string in col for ex_string in exclude_strings)]
+        print(f"除外されたカラム: {exclude_strings}")
+    else:
+        print("除外されたカラムはありません。")
+
+    # 選択リストの適用
+    if include_strings:
+        predictors = [col for col in predictors if any(in_string in col for in_string in include_strings)]
+        print(f"選択されたカラム: {include_strings}")
+    else:
+        print("選択されたカラムはありません。")
+
+    # 残りのカラム（基本ラベルを除外したもの）
+    other_columns = [col for col in predictors if col not in existing_base_labels]
+
+    # 新しいカラム順（基本ラベルを先頭に配置）
+    final_predictors = existing_base_labels + other_columns
+
+    return df[final_predictors]  # フィルタリング後のDataFrameを返す
+
+def preprocess_data(
+        desease_data, 
+        meteorological_data,
+        use_average_only=False, 
+        detect_outliers=False, 
+        z_threshold=3,
+        threshold_ratio=0.3,
+        exclude_strings=None, 
+        include_strings=None,
+        output_file="outputs/merged_data.csv"):
     
     """ 
     発病率データと気象データを統合し、データクレンジングを行う
@@ -179,6 +221,10 @@ def preprocess_data(desease_data,
         use_average_only (bool): 平均のみを使用するかどうか
         detect_outliers (bool): 外れ値を検出して除外するかどうか
         z_threshold (int): Zスコアのしきい値    
+        threshold_ratio (float): 欠損値の許容割合
+        exclude_strings (list): 除外するカラム名に部分一致する文字列のリスト
+        include_strings (list): 選択するカラム名に部分一致する文字列のリスト
+        output_file (str): 出力ファイル名
     
     Returns:
         pd.DataFrame: 統合されたデータフレーム
@@ -195,7 +241,11 @@ def preprocess_data(desease_data,
     # 外れ値検出＆除外
     print("---------------------------------------------------")
     if detect_outliers:
-        result_df = detect_and_remove_outliers(dropped_df, target_variable = "発病率", z_threshold = z_threshold)
+        outliered_df = detect_and_remove_outliers(dropped_df, target_variable = "発病率", z_threshold = z_threshold)
+
+    # 説明変数の事前選択
+    print("---------------------------------------------------")
+    result_df = filter_predictors(outliered_df, exclude_strings=exclude_strings, include_strings=include_strings)
     
     # データフレームをCSVに保存
     print("---------------------------------------------------")
@@ -206,43 +256,3 @@ def preprocess_data(desease_data,
 
     return result_df
 
-if __name__ == '__main__':
-
-    # 使用例
-    # ファイルパス
-    syukaku_data_path = 'resources/desease_data/disease_data_syukaku.xlsx'
-    tyozou_data_path = "resources/desease_data/disease_data_tyozou.xlsx"
-    
-    month_data_path = 'resources/meteorological_data/nandan_month_12-8.xlsx'  
-    syun_data_path = 'resources/meteorological_data/nandan_syun_12-8.xlsx'
-    start_year = 1990
-    end_year = 2023
-    target_varieties = ['ターザン']  # 取得したい品種を指定
-
-    # 病害データをインポート
-    syukaku_desease_data = tid.import_desease_data(syukaku_data_path, start_year=start_year, end_year=end_year, target_names=target_varieties, verbose=True)
-    tyozou_desease_data = tid.import_desease_data(tyozou_data_path, start_year=start_year, end_year=end_year, target_names=target_varieties, verbose=True)
-    # 気象データをインポート
-    meteorological_data_month = tim.import_meteorological_month_data(month_data_path, verbose=True)
-    meteorological_data_syun = tim.import_meteorological_syun_data(syun_data_path, verbose=True)
-
-    # データ結合
-    syukaku_syun_data = preprocess_data(
-        syukaku_desease_data, 
-        meteorological_data_syun, 
-        use_average_only=True, 
-        detect_outliers=True, 
-        z_threshold=3, 
-        threshold_ratio=0.3, 
-        output_file="outputs/test_merged_syukaku_syun_data.csv"
-    )
-
-    tyozou_syun_data = preprocess_data(
-        tyozou_desease_data, 
-        meteorological_data_syun, 
-        use_average_only=True, 
-        detect_outliers=True, 
-        z_threshold=3, 
-        threshold_ratio=0.3, 
-        output_file="outputs/test_merged_tyozou_syun_data.csv"
-    )
