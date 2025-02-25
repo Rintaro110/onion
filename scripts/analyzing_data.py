@@ -8,6 +8,8 @@ from tqdm import tqdm
 from functools import partial
 import random
 
+import output_results as op
+
 def calculate_vif(X):
     """VIFを計算し、10を超えるVIFがあるかどうかを返し、VIFが高い列のリストを返す。"""
     
@@ -60,6 +62,10 @@ def process_combination(combo, df, response):
     """
     X = sm.add_constant(df[list(combo)])
 
+    # インデックスをリセットして整合性を保つ
+    X = X.reset_index(drop=True)
+    response = response.reset_index(drop=True)
+
     if X.shape[1] > 2:
         # VIFチェック
         valid_vif, high_vif_columns = calculate_vif(X.drop(columns='const'))
@@ -111,6 +117,8 @@ def evaluate_model(response, df, predictors):
         tuple: (修正決定係数, モデルオブジェクト, 使用した説明変数リスト)
     """
     X = sm.add_constant(df[predictors])
+    X = X.reset_index(drop=True)
+    response = response.reset_index(drop=True)
     model = sm.OLS(response, X).fit()
     
     return model.rsquared_adj, model, predictors
@@ -362,7 +370,54 @@ def perfoem_multiple_regression_summation(df, top_n=1, max_k=None, cpu_count=mp.
 
     return best_models, best_predictors_list, df_final
 
-def run_regression_analysis(df, method="stepwise", labels=None, predictors = None, top_n=1, max_k=None, n_trials=10, random_seed=42, cpu_count=mp.cpu_count()-2):
+def perform_correlation_analysis_and_save_to_excel(df, filename="outputs/correlation_analysis.xlsx"):
+    """
+    発病率と気象データの相関係数を計算し、エクセルファイルに書き出す（相関係数の値で細かく色分け）。
+
+    :param df: データフレーム
+    :param filename: 保存するエクセルファイルの名前
+    """
+
+    print("---------------------------------------------------")
+    print("線形単回帰分析(相関分析)を開始します。")
+
+    # データの前処理
+    meta_data, response, predictors = prepare_data(df)
+
+    if not predictors:
+        raise ValueError("説明変数が存在しません。")
+
+    # 発病率と各気象データの相関係数を計算
+    correlation_results = {}
+    for predictor in predictors:
+        correlation = df[[response.name, predictor]].corr().iloc[0, 1]  # 発病率との相関
+        correlation_results[predictor] = correlation
+
+    # 結果をデータフレームに変換
+    correlation_df = pd.DataFrame(list(correlation_results.items()), columns=['気象情報', '相関係数'])
+
+    # 相関係数で降順にソート
+    correlation_df = correlation_df.sort_values(by='相関係数', ascending=False)
+
+    # 結果をエクセルファイルに保存（色付き）
+    op.save_correlation_results_with_colors(correlation_df, filename)
+    print(f"相関分析結果を {filename} に保存しました。")
+    print("---------------------------------------------------")
+
+    return None, None, None
+
+
+def run_regression_analysis(df, 
+                            method="stepwise", 
+                            labels=None, 
+                            predictors = None, 
+                            top_n=1, 
+                            max_k=None, 
+                            n_trials=10, 
+                            random_seed=42, 
+                            cpu_count=mp.cpu_count()-2,
+                            output_file_correlation = "outputs/correlation_analysis.xlsx"):
+                            
     """
     逐次選択法または総当たり法で最適な回帰モデルを選定。
 
@@ -376,6 +431,7 @@ def run_regression_analysis(df, method="stepwise", labels=None, predictors = Non
         n_trials (int): 逐次選択法で試行する回数（デフォルト: 10）
         random_seed (int): ランダムシード値（デフォルト: 42）
         cpu_count (int): 総当たり法で使用するCPUコアの数（デフォルト: mp.cpu_count()-2）
+        output_file_correlation (str): 相関分析の結果を保存するエクセルファイルのパス（デフォルト: "outputs/correlation_analysis.xlsx")
 
     Returns:
         list: statsmodelsのモデルオブジェクトのリスト
@@ -389,6 +445,8 @@ def run_regression_analysis(df, method="stepwise", labels=None, predictors = Non
         return perfoem_multiple_regression_summation(df, top_n=top_n, max_k=max_k, cpu_count=cpu_count)
     elif method == "normal":
         return perform_multiple_regression(df, predictors)
+    elif method == "correlation":
+        return perform_correlation_analysis_and_save_to_excel(df, filename=output_file_correlation)
     else:
         raise ValueError("Invalid method. Choose 'stepwise' or 'exhaustive'.")
 
