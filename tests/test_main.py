@@ -6,8 +6,6 @@ import test_output_results as op
 import multiprocessing as mp
 
 
-
-
 if __name__ == '__main__':
 
     # 使用例
@@ -48,11 +46,15 @@ if __name__ == '__main__':
         meteorological_data_syun, 
         use_average_only=True, 
         detect_outliers=True, 
-        z_threshold=3, 
-        threshold_ratio=0.3, 
-        exclude_strings = exclde_strings,
-        include_strings = labels,
-        output_file="outputs/merged_syukaku_syun_data.csv"
+        threshold_ratio=0.3,
+        target_variable='発病率',
+        z_threshold=3,
+        exclude_strings=exclde_strings, 
+        include_strings=labels,
+        apply_correlation_filter=False,
+        correlation_threshold=0.8,
+        output_file_correlation_pairs="outputs/high_correlation_pairs_syukaku_syun.xlsx",
+        output_file_selected_feature="outputs/merged_syukaku_syun_data.csv"
     )
 
     """ tyozou_syun_data = tdp.preprocess_data(
@@ -67,7 +69,13 @@ if __name__ == '__main__':
 
 
     # 回帰分析
-    """ best_models, best_predictors_list, df_final = ad.run_regression_analysis(
+    best_models, best_predictors_list, df_final = ad.run_regression_analysis(
+        syukaku_syun_data, 
+        method = 'correlation',
+        output_file_correlation="outputs/correlation.xlsx"
+    )
+
+    best_models, best_predictors_list, df_final = ad.run_regression_analysis(
         syukaku_syun_data, 
         method = 'exhaustive',
         top_n=2, 
@@ -75,7 +83,7 @@ if __name__ == '__main__':
         cpu_count=mp.cpu_count()-2
     )
 
-    best_models, best_predictors_list, df_final = ad.run_regression_analysis(
+    """ best_models, best_predictors_list, df_final = ad.run_regression_analysis(
         syukaku_syun_data, 
         method = 'stepwise',
         labels = labels_tyozou, 
@@ -84,11 +92,12 @@ if __name__ == '__main__':
         n_trials=2
     ) """
 
-    best_models, best_predictors_list, df_final = ad.run_regression_analysis(
+    """ best_models, best_predictors_list, df_final = ad.run_regression_analysis(
         syukaku_syun_data, 
         method = 'normal',
         predictors = labels_tyozou, 
-    )
+    ) """
+
 
 
     # 保存とプロット

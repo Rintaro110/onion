@@ -1,8 +1,5 @@
 import pandas as pd
-import numpy as np
-from sklearn.preprocessing import MinMaxScaler    
-from sklearn.preprocessing import StandardScaler    
-from sklearn.decomposition import PCA
+import test_filter as fl
 
 
 def merge_datasets(desease_data, meteorological_data, use_average_only=False):
@@ -160,57 +157,20 @@ def save_dataframe_to_csv(df, filename="merged_data.csv", index=False, verbose=T
     except Exception as e:
         print(f"Error CSVの保存に失敗しました: {e}")
 
-def filter_predictors(df, exclude_strings=None, include_strings=None):
-    """
-    特定の条件でカラムを除外または選択し、基本ラベル ['品種', '年度', '場所', '発病率'] を先頭に配置する。
-
-    :param df: DataFrame
-    :param exclude_strings: 除外するカラム名に部分一致する文字列のリスト
-    :param include_strings: 選択するカラム名に部分一致する文字列のリスト
-    :return: フィルタリング後のDataFrame
-    """
-
-    # 必ず含める基本ラベル（順序を維持）
-    base_labels = ['品種', '年度', '場所', '発病率']
-    
-    # データフレーム内に存在する基本ラベルのみを取得
-    existing_base_labels = [col for col in base_labels if col in df.columns]
-
-    # すべてのカラムを取得
-    predictors = df.columns.tolist()
-
-    # 除外リストの適用
-    if exclude_strings:
-        predictors = [col for col in predictors if not any(ex_string in col for ex_string in exclude_strings)]
-        print(f"除外されたカラム: {exclude_strings}")
-    else:
-        print("除外されたカラムはありません。")
-
-    # 選択リストの適用
-    if include_strings:
-        predictors = [col for col in predictors if any(in_string in col for in_string in include_strings)]
-        print(f"選択されたカラム: {include_strings}")
-    else:
-        print("選択されたカラムはありません。")
-
-    # 残りのカラム（基本ラベルを除外したもの）
-    other_columns = [col for col in predictors if col not in existing_base_labels]
-
-    # 新しいカラム順（基本ラベルを先頭に配置）
-    final_predictors = existing_base_labels + other_columns
-
-    return df[final_predictors]  # フィルタリング後のDataFrameを返す
-
 def preprocess_data(
         desease_data, 
         meteorological_data,
-        use_average_only=False, 
-        detect_outliers=False, 
-        z_threshold=3,
+        use_average_only=True, 
+        detect_outliers=True, 
         threshold_ratio=0.3,
+        target_variable='発病率',
+        z_threshold=3,
         exclude_strings=None, 
         include_strings=None,
-        output_file="outputs/merged_data.csv"):
+        apply_correlation_filter=False,
+        correlation_threshold=0.8,
+        output_file_correlation_pairs="outputs/high_correlation_pairs.xlsx",
+        output_file_selected_feature="outputs/merged_data.csv"):
     
     """ 
     発病率データと気象データを統合し、データクレンジングを行う
@@ -241,15 +201,22 @@ def preprocess_data(
     # 外れ値検出＆除外
     print("---------------------------------------------------")
     if detect_outliers:
-        outliered_df = detect_and_remove_outliers(dropped_df, target_variable = "発病率", z_threshold = z_threshold)
+        outliered_df = detect_and_remove_outliers(dropped_df, target_variable = target_variable, z_threshold = z_threshold)
 
     # 説明変数の事前選択
     print("---------------------------------------------------")
-    result_df = filter_predictors(outliered_df, exclude_strings=exclude_strings, include_strings=include_strings)
+    result_df = fl.filter_predictors(
+        outliered_df, 
+        exclude_strings=exclude_strings, 
+        include_strings=include_strings, 
+        apply_correlation_filter=apply_correlation_filter, 
+        target_variable=target_variable, 
+        correlation_threshold = correlation_threshold, 
+        filename=output_file_correlation_pairs) 
     
     # データフレームをCSVに保存
     print("---------------------------------------------------")
-    save_dataframe_to_csv(result_df, filename=output_file)
+    save_dataframe_to_csv(result_df, filename=output_file_selected_feature)
 
     print(f"最終的なDataFrameの形状: {result_df.shape}")
     print("---------------------------------------------------")

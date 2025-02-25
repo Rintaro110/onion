@@ -4,6 +4,9 @@ import matplotlib.pyplot as plt
 import japanize_matplotlib
 import seaborn as sns
 import os
+import openpyxl
+from openpyxl.styles import PatternFill
+from openpyxl import Workbook
 
 
 def save_results_to_excel(models, predictors_list, filename="regression_results.xlsx", folder="outputs"):
@@ -199,3 +202,52 @@ def plot_explanatory_vs_target(df_final, filename_prefix="explanatory_vs_target"
 
     print("---------------------------------------------------")
 
+def save_correlation_results_with_colors(correlation_df, filename):
+    """
+    相関係数の値に応じて細かく色を付けてエクセルに保存する。
+
+    :param correlation_df: 相関係数を含むデータフレーム
+    :param filename: 保存するエクセルファイルの名前
+    """
+
+    # Workbookを作成
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Correlation Analysis"
+
+    # ヘッダーを書き込み
+    ws.append(correlation_df.columns.tolist())
+
+    # 色の定義（6段階）
+    fill_very_high_positive = PatternFill(start_color="008000", end_color="008000", fill_type="solid")  # 濃い緑（非常に強い正の相関）
+    fill_high_positive = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")  # 緑（強い正の相関）
+    fill_medium_positive = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")  # 薄い緑（中程度の正の相関）
+    fill_weak = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")  # 黄色（弱い相関）
+    fill_medium_negative = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")  # 薄い赤（中程度の負の相関）
+    fill_high_negative = PatternFill(start_color="FF6666", end_color="FF6666", fill_type="solid")  # 赤（強い負の相関）
+    fill_very_high_negative = PatternFill(start_color="800000", end_color="800000", fill_type="solid")  # 濃い赤（非常に強い負の相関）
+
+    # データを書き込み & 条件付き書式を適用
+    for row in correlation_df.itertuples(index=False):
+        気象情報, 相関係数 = row
+        ws.append([気象情報, 相関係数])
+
+        # 色を設定（細かい条件分岐）
+        cell = ws[f"B{ws.max_row}"]
+        if 相関係数 >= 0.5:
+            cell.fill = fill_very_high_positive  # 濃い緑（非常に強い正の相関）
+        elif 0.3 <= 相関係数 < 0.5:
+            cell.fill = fill_high_positive  # 緑（強い正の相関）
+        elif 0.2 <= 相関係数 < 0.3:
+            cell.fill = fill_medium_positive  # 薄い緑（中程度の正の相関）
+        elif -0.2 <= 相関係数 < 0.2:
+            cell.fill = fill_weak  # 黄色（弱い相関）
+        elif -0.3 <= 相関係数 < -0.2:
+            cell.fill = fill_medium_negative  # 薄い赤（中程度の負の相関）
+        elif -0.5 <= 相関係数 < -0.3:
+            cell.fill = fill_high_negative  # 赤（強い負の相関）
+        else:
+            cell.fill = fill_very_high_negative  # 濃い赤（非常に強い負の相関）
+
+    # Excelに保存
+    wb.save(filename)
