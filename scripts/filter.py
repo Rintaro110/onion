@@ -58,8 +58,6 @@ def filter_predictors(df,
     final_columns = existing_base_labels + predictors
     return df[final_columns]  # フィルタリング後のDataFrameを返す
 
-
-
 def select_and_filter_predictors(df, target_variable='発病率', correlation_threshold=0.8, filename="outputs/high_correlation_pairs.xlsx"):
     """
     説明変数の相関行列と文字列条件に基づいて、特定の説明変数を選択し、相関が高いペアを
