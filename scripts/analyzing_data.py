@@ -124,24 +124,25 @@ def evaluate_model(response, df, predictors):
     return model.rsquared_adj, model, predictors
 
 def generate_results(best_models, best_predictors_list, df, meta_data, response):
-    """
-    最適なモデルの出力データフレームを作成する。
-    
-    Args:
-        best_models (list): statsmodels のモデルオブジェクトのリスト
-        best_predictors_list (list): 各モデルの説明変数のリスト
-        df (pd.DataFrame): 入力データフレーム
-        meta_data (pd.DataFrame): メタデータ
-        response (pd.Series): 目的変数
-
-    Returns:
-        pd.DataFrame: モデルの結果データフレーム
-    """
     df_results_list = []
 
+    df = df.reset_index(drop=True)
+    meta_data = meta_data.reset_index(drop=True)
+    response = response.reset_index(drop=True)
+
     for i, model in enumerate(best_models):
-        best_X = sm.add_constant(df[best_predictors_list[i]])
-        predictions = model.predict(best_X)
+        # モデルが学習した変数の順序を取得
+        predictors = [col for col in model.model.exog_names if col != 'const']
+        
+        # 予測用データ作成
+        X = sm.add_constant(df[predictors], has_constant='add')
+        predictions = model.predict(X)
+
+        print(f"=== Model {i+1} ===")
+        print("Predictors:", predictors)
+        print("R²:", model.rsquared_adj)
+        print("予測値 head:", predictions.head())
+        print("実測値 head:", response.head())
 
         df_results = pd.DataFrame({
             "モデルID": f"Best_{i+1}",
@@ -150,10 +151,11 @@ def generate_results(best_models, best_predictors_list, df, meta_data, response)
             "誤差": response - predictions
         })
 
-        df_results = pd.concat([meta_data, df_results, df[best_predictors_list[i]]], axis=1)
+        df_results = pd.concat([meta_data, df_results, df[predictors]], axis=1)
         df_results_list.append(df_results)
 
     return pd.concat(df_results_list, axis=0, ignore_index=True)
+
 
 def perform_multiple_regression(df, selected_features):
     """
@@ -220,6 +222,8 @@ def perform_stepwise_multiple_regression(df, labels=None, top_n=1, max_k=None, n
     if labels is None:
         labels = []
         print("必須説明変数 is None")
+    else:
+        labels = list(labels)  # ← ここを追加
     
     # 最大説明変数数の設定
     if max_k is None:

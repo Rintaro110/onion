@@ -1,7 +1,8 @@
 import pandas as pd
 from collections import defaultdict
 
-def import_desease_data(file_path, start_year=None, end_year=None, target_names=["ターザン", "もみじ3号", "もみじの輝"], verbose=False):
+
+def import_disease_data(file_path, start_year=None, end_year=None, target_names=["ターザン", "もみじ3号", "もみじの輝"], verbose=False):
     # Excelファイルを読み込む
     print("---------------------------------------------------")
     df = pd.read_excel(file_path)
@@ -58,18 +59,22 @@ def import_desease_data(file_path, start_year=None, end_year=None, target_names=
     return organized_data
 
 
+
+
+    
+
 if __name__ == '__main__':
 
     # 使用例
-    syukaku_data_path = 'resources/desease_data/disease_data_syukaku.xlsx'
-    tyozou_data_path = "resources/desease_data/disease_data_tyozou.xlsx"
+    syukaku_data_path = 'resources/disease_data/disease_data_syukaku.xlsx'
+    tyozou_data_path = "resources/disease_data/disease_data_tyozou.xlsx"
     start_year = 1990
     end_year = 2023
     target_varieties = ['ターザン']  # 取得したい品種を指定
 
     # Example usage
-    syukaku_desease_data = import_desease_data(syukaku_data_path, start_year=start_year, end_year=end_year, verbose=True)
-    tyozou_desease_data = import_desease_data(tyozou_data_path, start_year=start_year, end_year=end_year, verbose=True)
+    syukaku_desease_data = import_disease_data(syukaku_data_path, start_year=start_year, end_year=end_year, verbose=True)
+    tyozou_desease_data = import_disease_data(tyozou_data_path, start_year=start_year, end_year=end_year, verbose=True)
     
     # Print the output
     for variety, years_data in syukaku_desease_data.items():
@@ -92,3 +97,5 @@ if __name__ == '__main__':
                     print(f"    平均値: {value}%")
                 else:
                     print(f"    場所: {location}, データ: {value}%")
+
+
