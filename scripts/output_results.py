@@ -7,7 +7,11 @@ import os
 import openpyxl
 from openpyxl.styles import PatternFill
 from openpyxl import Workbook
+import re
 
+def sanitize_filename(s):
+    # ファイル名に使えない文字を `_` に置き換える
+    return re.sub(r'[\\/:"*?<>|]+', '_', s)
 
 def save_results_to_excel(models, predictors_list, filename="regression_results.xlsx", folder="outputs"):
     """
@@ -194,8 +198,10 @@ def plot_explanatory_vs_target(df_final, filename_prefix="explanatory_vs_target"
             plt.legend()
             plt.grid(True)
 
-            # 画像を保存
-            filename = f"{folder}/{feature}_vs_発病率_{model_id}.pdf"
+
+            # 安全なファイル名に変換して保存
+            safe_feature = sanitize_filename(feature)
+            filename = f"{folder}/{safe_feature}_vs_発病率_{model_id}.pdf"
             plt.savefig(filename, format="pdf")
             plt.close()
             print(f"Plot saved as {filename}")
