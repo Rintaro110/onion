@@ -6,71 +6,121 @@ import japanize_matplotlib
 from matplotlib.dates import DateFormatter
 import seaborn as sns
 import os
+from openpyxl import load_workbook
+import numpy as np
+import os
 
-def import_disease_data_sammary(file_path, verbose=False):
+def import_disease_data(file_path, brand, start_year, end_year):
     print("---------------------------------------------------")
     print(f"データ読み込み完了: {file_path}")
-    
+    print(f"品種: {brand}")
+    print(f"年度範囲: {start_year}年 ～ {end_year}年")
 
-    excel = pd.ExcelFile(file_path)
-    records = []
+    wb = load_workbook(file_path, data_only=True)
+    data = []
 
-    for sheet in excel.sheet_names:
+    # C〜L列 (index 2〜11) に対応する時期ラベル
+    period_map_by_col = {
+        2: "貯蔵調査",
+        3: "収穫日",
+        4: "5月下旬",
+        5: "5月上旬",
+        6: "4月下旬",
+        7: "4月上旬",
+        8: "3月下旬",
+        9: "3月上旬",
+        10: "2月下旬",
+        11: "2月上旬"
+    }
+
+    for sheet_name in wb.sheetnames:
+        # 年度として扱えるシートのみを対象
         try:
-            year = int(sheet)
+            year = int(sheet_name)
         except ValueError:
+            print(f"Warning: '{sheet_name}' は年度として扱えません。スキップします。")
             continue
-        
-        # 対象行（0-based）
-        target_row = 18 if year <= 2007 else 16
 
-        # データをヘッダーなしで読み込む
-        df = pd.read_excel(file_path, sheet_name=sheet, header=None)
+        if not (start_year <= year <= end_year):
+            continue
 
-        # 指定行のB列が対象の品種名か確認
-        product = df.iat[target_row, 1]  # B列（index=1）
-        if pd.isna(product) or product != target_name:
-            continue  # このシートはスキップ
+        # 該当シートの読み込み（ヘッダーなし）
+        df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
 
-        # 日付は1行目のC列以降（index=2〜）
-        date_headers = pd.to_datetime(df.iloc[0, 2:], errors='coerce')
-        values = df.iloc[target_row, 2:]
+        # 品種名と"平均"を探す
+        for idx in range(len(df)):
+            if str(df.iloc[idx, 0]) == "平均" and str(df.iloc[idx, 1]) == brand:
+                target_row = idx
+                break
+        else:
+            print(f"Warning: 品種 '{brand}' が年度 '{sheet_name}' に見つかりません。")
+            continue  # 品種が存在しない場合スキップ
 
-        for date, val in zip(date_headers, values):
-            if pd.isna(date):
+        # データ抽出
+        for col in range(2, df.shape[1]):
+            value = df.iat[target_row, col]
+
+            # 日付取得（D列だけ例外）
+            if col == 3:
+                date = df.iat[target_row, 12]  # M列（収穫日）
+            else:
+                date = df.iat[0, col]  # 通常は1行目
+
+            try:
+                date_parsed = pd.to_datetime(date).date()
+            except:
                 continue
-            records.append({
-                '年度': year,
-                '品種名': product,
-                '日付': date.strftime('%m-%d'),
-                '発病率': val
+
+            # 時期名を列インデックスから取得（ない場合は "不明"）
+            period_label = period_map_by_col.get(col, "不明")
+
+            if pd.isna(value):
+                print(f"Warning: NaN value found in {period_label} {year}年 {brand} 品種")
+                value = None
+
+            elif isinstance(value, (int, float)):
+                value = float(value)
+            else:   
+                print(f"Warning: 数値以外の値 '{value}' {period_label} {year}年 {brand} 品種が見つかりました。スキップします。")
+                value = None
+
+            data.append({
+                "brand": brand,
+                "year": year,
+                "period": period_label,
+                "date": date_parsed,
+                "incidence": value
             })
 
-    # データフレーム化
-    result_df = pd.DataFrame(records)
-    result_df = result_df.sort_values(['年度', '日付']).reset_index(drop=True)
-
-    # 保存
+    # 保存処理
     os.makedirs("results_it", exist_ok=True)
-    result_df.to_excel("results_it/時系列発病率データ.xlsx", index=False)
-
-    if verbose:
-        print(result_df.head())
+    output_path = os.path.join("results_it", f"{brand}_disease_data.xlsx")
+    save_records_to_excel(data, output_path)
 
     print("病害データ取得完了。")
     print("---------------------------------------------------")
 
-    return result_df
+    return data
+
+def save_records_to_excel(records, output_path):
+    if not records:
+        print("⚠️ データが取得されていません。出力はスキップされました。")
+        return
+
+    df = pd.DataFrame(records)
+    # Excelとして保存
+    df.to_excel(output_path, index=False)
+    print(f"データを {output_path} に保存しました（{len(df)} 件）。")
 
 
-def plot_disease_trends_by_year(excel_path, target_name="ターザン", output_dir=None, show=True):
+def plot_disease_trends_by_year(data, target_name="ターザン", output_dir=None, show=True):
     """
     Plot disease incidence trends by year for a specific variety, using MM-DD observation dates.
 
-    Parameters:
+    Parameters
     ----------
-    excel_path : str
-        Path to the Excel file containing the dataset.
+    data : list of dict
+        Output from import_disease_data(), containing keys like brand, year, date, period, incidence.
     target_name : str
         Target variety name (default: "ターザン").
     output_dir : str or None
@@ -79,35 +129,36 @@ def plot_disease_trends_by_year(excel_path, target_name="ターザン", output_d
         If True, the plot is displayed (default: True).
     """
 
-    df = pd.read_excel(excel_path)
+    # リスト→DataFrame
+    df = pd.DataFrame(data)
 
-    # Filter by target variety
-    df = df[df["品種名"] == target_name].copy()
+    # 品種でフィルタ
+    df = df[df["brand"] == target_name].copy()
     if df.empty:
         print(f"No data found for variety '{target_name}'.")
         return
 
-    # Convert MM-DD string to datetime (dummy year 2000)
-    df['日付_dt'] = pd.to_datetime('2000-' + df['日付'], format='%Y-%m-%d')
+    # incidence 欠損を除外
+    df = df[df["incidence"].notna()]
 
-    # Plot
+    # date列を 2000年のダミー日付に変換（x軸用）
+    df['date_dt'] = pd.to_datetime(df['date'].apply(lambda d: f"2000-{d.month:02d}-{d.day:02d}"))
+
+    # プロット
     plt.figure(figsize=(10, 10))
-    sns.lineplot(data=df, x='日付_dt', y='発病率', hue='年度', palette='tab20', marker='o')
+    sns.lineplot(data=df, x='date_dt', y='incidence', hue='year', marker='o', palette='tab20')
 
     plt.title(f"Disease incidence trends of {target_name}", fontsize=14)
     plt.xlabel("Observation date (MM-DD)")
     plt.ylabel("Incidence rate")
 
-    # Format x-axis to hide the year
-    date_format = DateFormatter("%m-%d")
-    plt.gca().xaxis.set_major_formatter(date_format)
-
+    plt.gca().xaxis.set_major_formatter(DateFormatter("%m-%d"))
     plt.xticks(rotation=45)
-    plt.legend(title="Year", bbox_to_anchor=(1.02, 1), loc='upper left')
     plt.grid(True)
+    plt.legend(title="Year", bbox_to_anchor=(1.02, 1), loc='upper left')
     plt.tight_layout()
 
-    # Save plot if output directory is specified
+    # 保存
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, f"{target_name}_incidence_trends.png")
@@ -119,22 +170,14 @@ def plot_disease_trends_by_year(excel_path, target_name="ターザン", output_d
     else:
         plt.close()
 
-
-    
-
 if __name__ == '__main__':
 
 
     file_path = "resources/disease_data/onion_disease_sammary.xlsx"
+    output_dir = "results_it"
+    os.makedirs(output_dir, exist_ok=True)
     target_name = "ターザン"
 
     # 病害データをインポート
-    disease_data= import_disease_data_sammary(file_path)
-    print(disease_data)
-
-    plot_disease_trends_by_year(
-        excel_path="時系列発病率データ.xlsx",
-        target_name="ターザン",
-        output_dir="results_it/disease_trends",
-        show=False
-    )
+    disease_data= import_disease_data(file_path, target_name, start_year=1994, end_year=2022)
+    plot_disease_trends_by_year(disease_data, target_name=target_name, output_dir=output_dir, show=True)
