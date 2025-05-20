@@ -9,6 +9,7 @@ import os
 from openpyxl import load_workbook
 import numpy as np
 import os
+import datetime
 
 def import_disease_data(file_path, brand, start_year, end_year):
     print("---------------------------------------------------")
@@ -60,16 +61,22 @@ def import_disease_data(file_path, brand, start_year, end_year):
         for col in range(2, df.shape[1]):
             value = df.iat[target_row, col]
 
-            # 日付取得（D列だけ例外）
-            if col == 3:
-                date = df.iat[target_row, 12]  # M列（収穫日）
-            else:
-                date = df.iat[0, col]  # 通常は1行目
-
             try:
-                date_parsed = pd.to_datetime(date).date()
-            except:
-                continue
+                if col == 3:
+                    date_raw = df.iat[target_row, 12]  # M列（収穫日）
+                else:
+                    date_raw = df.iat[0, col]  # 通常は1行目の観測日
+
+                date_parsed = pd.to_datetime(date_raw).date()
+                days_from_jan1 = (date_parsed - datetime.date(date_parsed.year, 1, 1)).days
+
+            except Exception as e:
+                if str(date_raw) not in {"収穫日", "整合性"}:
+                    print(f"Warning: {period_label} {year}年 {brand} 品種で日付のパースまたは日数計算に失敗: {date_raw} → {e}")
+                    date_parsed = None
+                    days_from_jan1 = None
+                else:
+                    continue
 
             # 時期名を列インデックスから取得（ない場合は "不明"）
             period_label = period_map_by_col.get(col, "不明")
@@ -89,8 +96,10 @@ def import_disease_data(file_path, brand, start_year, end_year):
                 "year": year,
                 "period": period_label,
                 "date": date_parsed,
-                "incidence": value
+                 "incidence": value,
+                "days_from_jan1": days_from_jan1
             })
+
 
     # 保存処理
     os.makedirs("results_it", exist_ok=True)

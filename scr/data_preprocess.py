@@ -37,6 +37,11 @@ def merge_disease_and_weather(disease_df, weather_df):
         period = row["period"]  # <- 必須
         record = row.to_dict()
 
+        # 欠損チェック（dateまたはperiodが欠けていたらスキップ）
+        if obs_date is None or period is None:
+            print(f"Skipped: year={year}, period={period}, obs_date={obs_date}")
+            continue
+
         # period に応じて day_list を取得
         weather_windows = wd.get_multiple_weather_period(weather_df, year, obs_date, period)
 
@@ -144,9 +149,6 @@ def preprocess_data(disease_df, weather_df, save_path="results_it/merged_feature
     return cleaned_df
 
     merge_disease_and_weather(disease_df, weather_df, save_path)
-
-
-
 
 
 if __name__ == "__main__":
