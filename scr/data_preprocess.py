@@ -123,7 +123,7 @@ def drop_missing_records(df):
 
     return cleaned_df
 
-def preprocess_data(disease_df, weather_df, save_path="results_it/merged_features.xlsx"):
+def preprocess_data(disease_df, weather_df, period_order, use_past_incidence=False, save_path="results_it/merged_features.xlsx"):
     """
     Preprocess the data by merging disease and weather data.
 
@@ -143,12 +143,60 @@ def preprocess_data(disease_df, weather_df, save_path="results_it/merged_feature
     """
     merged_df = merge_disease_and_weather(disease_df, weather_df)
     cleaned_df = drop_missing_records(merged_df)
-    save_merged_data_to_excel(merged_df, save_path)
+    stepwise_data = prepare_stepwise_prediction_data(cleaned_df, period_order, use_past_incidence)
+
+    save_merged_data_to_excel(stepwise_data, save_path)
 
 
-    return cleaned_df
+    return stepwise_data
 
     merge_disease_and_weather(disease_df, weather_df, save_path)
+
+
+import pandas as pd
+
+def prepare_stepwise_prediction_data(df, period_order, use_past_incidence=False):
+    print("---------------------------------------------------")
+    print("🔧 prepare_stepwise_prediction_data(): 整形＋NaN列除去処理を開始します")
+
+    df_list = []
+    for i, target_period in enumerate(period_order):
+        current_df = df[df["period"] == target_period].copy()
+        if current_df.empty:
+            print(f"⚠️ {target_period} のデータが存在しません。スキップ。")
+            continue
+
+        if use_past_incidence:
+            for past_period in period_order[:i]:
+                col_name = f"{past_period}_incidence"
+                past_data = df[df["period"] == past_period][["brand", "year", "incidence"]].rename(columns={"incidence": col_name})
+                current_df = current_df.merge(past_data, on=["brand", "year"], how="left")
+
+        df_list.append(current_df)
+
+    if not df_list:
+        print("❌ 全てのperiodでデータが見つからなかったため、処理を中断します。")
+        return pd.DataFrame()
+
+    full_df = pd.concat(df_list, ignore_index=True)
+
+    na_cols = full_df.columns[full_df.isna().all()].tolist()
+    cleaned_df = full_df.drop(columns=na_cols)
+
+    print(f"✅ 完成データサイズ: {cleaned_df.shape}")
+    if na_cols:
+        print("🧹 以下の列は全行NaNのため削除されました:")
+        for col in na_cols:
+            print(f"  - {col}")
+    else:
+        print("✅ 全ての列に有効なデータが存在しています。")
+
+    print("---------------------------------------------------")
+    
+    return cleaned_df
+
+
+
 
 
 if __name__ == "__main__":
@@ -161,6 +209,10 @@ if __name__ == "__main__":
     start_year = 1994
     end_year  = 2023
 
+    period_order = [
+        "2月上旬", "2月下旬", "3月上旬", "3月下旬", "4月上旬", "4月下旬", "5月上旬", "5月下旬", "収穫日", "貯蔵調査"
+    ]
+
     # 病害データをインポート
     disease_list= dd.import_disease_data(dd_file_path, target_name, start_year, end_year)
     disease_df = pd.DataFrame(disease_list)
@@ -168,4 +220,6 @@ if __name__ == "__main__":
     # データ抽出
     weather_df = wd.extract_meteorological_data(wd_file_path, start_year, end_year)
     # データマージ
-    merged_data = preprocess_data(disease_df, weather_df)
+    merged_data = preprocess_data(disease_df, weather_df, period_order)
+    print(merged_data)
+    
