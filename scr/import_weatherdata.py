@@ -88,7 +88,8 @@ def extract_meteorological_data(file_path, start_year, end_year):
 
     return df
 
-def get_weather_window_avg(df, year, obs_date, days=7):
+
+def get_weather_window_avg(df, year, obs_date, start_day, end_day):
     """
     Compute the average weather values over a given period before the observation date.
 
@@ -100,8 +101,10 @@ def get_weather_window_avg(df, year, obs_date, days=7):
         Target year (e.g., 2017)
     obs_date : datetime.date
         Observation date
-    days : int
-        Number of days to include before the observation date (default: 7)
+    start_day : int
+        Start of the window (days before obs_date, inclusive)
+    end_day : int
+        End of the window (days before obs_date, inclusive)
 
     Returns
     -------
@@ -109,22 +112,17 @@ def get_weather_window_avg(df, year, obs_date, days=7):
         Aggregated average per weather item:
         [weather_item, year, period, value]
     """
-    start_date = obs_date - timedelta(days=days)
-    end_date = obs_date
+    start_date = obs_date - timedelta(days=end_day)
+    end_date = obs_date - timedelta(days=start_day)
 
-    # Filter by year and date range
     subset = df[(df["year"] == year) & 
                 (df["date"] >= start_date) & 
                 (df["date"] <= end_date)].copy()
 
-    # Group by weather item and calculate mean
     result = subset.groupby("weather_item", as_index=False)["value"].mean()
 
-    # Add year and period label
     result["year"] = year
-    result["period"] = f"{days}days"
-
-    # Reorder columns
+    result["period"] = f"{start_day}-{end_day}days"
     result = result[["weather_item", "year", "period", "value"]]
 
     return result
@@ -150,8 +148,6 @@ def get_multiple_weather_period(df, year, obs_date, period):
     dict of pd.DataFrame
         Dictionary of averaged weather data keyed by day range (e.g., '7days', '30days', ...)
     """
-
-    # マッピング定義：観測時期 → 日数リスト
     period_day_mapping = {
         "2月上旬": [7, 14, 30, 60],
         "2月下旬": [7, 14, 30, 60],
@@ -165,16 +161,22 @@ def get_multiple_weather_period(df, year, obs_date, period):
         "貯蔵調査": [7, 14, 30, 60, 90, 120, 150, 180, 210, 240]
     }
 
-    # 対象期間のリスト取得（存在しない場合はデフォルトを使う）
     day_list = period_day_mapping.get(period, [7, 14, 30])
 
     result = {}
-    for days in day_list:
-        df_window = get_weather_window_avg(df, year, obs_date, days=days)
-        result[f"{days}days"] = df_window
+    for i, days in enumerate(day_list):
+        if days == 7:
+            start_day = 1
+            end_day = 7
+        else:
+            prev = day_list[i - 1] if i > 0 else 7
+            start_day = prev + 1
+            end_day = days
+
+        df_window = get_weather_window_avg(df, year, obs_date, start_day=start_day, end_day=end_day)
+        result[f"{end_day}days"] = df_window
 
     return result
-
 
 if __name__ == "__main__":
     file_path = "resources/meteorological_data/1990_2025_sumoto.xlsx"
