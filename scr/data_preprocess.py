@@ -123,32 +123,25 @@ def drop_missing_records(df):
 
     return cleaned_df
 
-def preprocess_data(disease_df, weather_df, period_order, use_past_incidence=False, save_path="results_it/merged_features.xlsx"):
+def preprocess_data(disease_df, weather_df, period_order, use_past_incidence=False, save_path="results_it/merged_features.xlsx", test_years=[2022, 2023, 2024]):
     """
-    Preprocess the data by merging disease and weather data.
-
-    Parameters
-    ----------
-    disease_df : pd.DataFrame
-        Disease incidence data (columns: brand, year, date, period, incidence)
-    weather_df : pd.DataFrame
-        Long-format weather data (columns: weather_item, year, date, value)
-    save_path : str
-        Path to save the merged Excel file
-
-    Returns
-    -------
-    pd.DataFrame
-        Merged DataFrame with disease and weather features
+    前処理段階で学習データとテストデータを分割
     """
+
     merged_df = merge_disease_and_weather(disease_df, weather_df)
     cleaned_df = drop_missing_records(merged_df)
     stepwise_data = prepare_stepwise_prediction_data(cleaned_df, period_order, use_past_incidence)
 
+    # 学習用・テスト用に分割
+    train_df = stepwise_data[~stepwise_data["year"].isin(test_years)].reset_index(drop=True)
+    test_df  = stepwise_data[stepwise_data["year"].isin(test_years)].reset_index(drop=True)
+
+    # 保存処理
     save_merged_data_to_excel(stepwise_data, save_path)
+    print(f"✅ 学習データ: {train_df.shape}, テストデータ: {test_df.shape}")
 
+    return train_df, test_df
 
-    return stepwise_data
 
     merge_disease_and_weather(disease_df, weather_df, save_path)
 

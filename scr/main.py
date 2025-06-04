@@ -16,10 +16,10 @@ if __name__ == "__main__":
     output_dir = "results_it"
     target_name = "ターザン"
     start_year = 1994
-    end_year  = 2023
+    end_year  = 2024
 
     period_order = [
-        "2月上旬", "2月下旬", "3月上旬", "3月下旬", "4月上旬", "4月下旬", "5月上旬", "5月下旬", "収穫日", "貯蔵調査"
+        "2月上旬", "2月下旬", "3月上旬", "3月下旬", "4月上旬", "4月下旬", "5月上旬", "5月下旬", "収穫日"
     ]
     target_period = "収穫日"
 
@@ -30,9 +30,13 @@ if __name__ == "__main__":
     # データ抽出
     weather_df = wd.extract_meteorological_data(wd_file_path, start_year, end_year)
     # データマージ
-    merged_data = dp.preprocess_data(disease_df, weather_df, period_order, use_past_incidence=False)
+    train_df, test_df = dp.preprocess_data(disease_df, weather_df, period_order, use_past_incidence=False)
     # ad.sequential_linear_regression(merged_data, period_order, target_period, max_features=4)
-    results = lr.sequential_linear_regression(merged_data, period_order, target_period, max_features=4, n_jobs=8)
+    # train_result_df, test_result_df, train_all, test_all = lr.sequential_regression(train_df, test_df, target_col="incidence", periods_order=period_order, max_features=2, n_jobs=6)
+    train_result_df, test_result_df, train_all, test_all = xgb.sequential_xgboost(train_df, test_df, target_col="incidence", periods_order=period_order)
     # 結果をエクスポート
-    op.save_sequential_regression_results(results, merged_data, output_excel="results_it/sequential_linear_results.xlsx")
-    op.plot_sequential_regression_results(merged_data, folder="results_it", filename_prefix="sequential_linear_fit")
+    df_final = op.save_sequential_results(train_result_df, test_result_df, train_all, test_all, output_excel="results_it/sequential_xgboost_results.xlsx")
+
+    # 全体評価
+    summary = op.evaluate_sequential_model(train_result_df, test_result_df)
+    op.plot_sequential_model_results(train_result_df, test_result_df, output_dir="results_it")

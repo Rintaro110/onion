@@ -1,89 +1,86 @@
-import pandas as pd
 import os
-import re
+import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import japanize_matplotlib
+from sklearn.linear_model import LinearRegression
+import re
 
+# ファイル名サニタイズ
 def sanitize_filename(s):
     return re.sub(r'[\\/:"*?<>|]+', '_', s)
 
-def save_sequential_regression_results(results_df, df_all, output_excel="outputs/sequential_results.xlsx"):
-    """
-    各 period の回帰結果（予測値、実測値、説明変数など）を Excel に保存する。
-
-    Args:
-        results_df (pd.DataFrame): sequential_linear_regression の返り値（period, r2_adj, rmse, features）
-        df_all (pd.DataFrame): 各期のデータ全体（predictionカラムを含む）
-        output_excel (str): 出力ファイル名
-
-    Returns:
-        None
-    """
+# ✅ 完全統合版：予測結果保存
+def save_sequential_results(train_results, test_results, train_all, test_all, output_excel="outputs/sequential_results.xlsx"):
     os.makedirs(os.path.dirname(output_excel), exist_ok=True)
 
+    # ① 全予測データまとめ (train + test 合体)
     all_rows = []
-    for idx, row in results_df.iterrows():
+
+    for idx, row in train_results.iterrows():
         period = row["period"]
-        features = list(row["features"])
+        features = row["features"]
         pred_col = f"{period}_pred"
 
-        df_period = df_all[df_all["period"] == period].copy()
-        if pred_col not in df_period.columns:
-            continue
+        # train
+        df_train_period = train_all[train_all["period"] == period].copy()
+        df_train_period["data_type"] = "train"
 
-        df_result = df_period[["brand", "year", "incidence"] + features].copy()
-        df_result["predicted"] = df_period[pred_col]
-        df_result["period"] = period
-        df_result.rename(columns={"incidence": "actual"}, inplace=True)
-        all_rows.append(df_result)
+        # test
+        df_test_period = test_all[test_all["period"] == period].copy()
+        df_test_period["data_type"] = "test"
 
-    if not all_rows:
-        print("❌ 保存対象の結果が存在しません")
-        return
+        df_period = pd.concat([df_train_period, df_test_period])
+        df_period["period"] = period
+
+        # 共通カラムのみ抽出
+        base_cols = ["brand", "year", "period", "incidence", pred_col, "data_type"]
+        cols_exist = [col for col in base_cols if col in df_period.columns]
+        df_period = df_period[cols_exist].rename(columns={"incidence": "actual", pred_col: "predicted"})
+
+        all_rows.append(df_period)
 
     df_final = pd.concat(all_rows, ignore_index=True)
-    df_final = df_final[["brand", "year", "period", "actual", "predicted"] + [col for col in df_final.columns if col not in ["brand", "year", "period", "actual", "predicted"]]]
 
-    df_final.to_excel(output_excel, index=False)
-    print(f"📁 回帰結果を保存しました: {output_excel}")
+    # ② 保存
+    with pd.ExcelWriter(output_excel) as writer:
+        df_final.to_excel(writer, sheet_name="Predictions", index=False)
+        train_results.to_excel(writer, sheet_name="Train_Summary", index=False)
+        test_results.to_excel(writer, sheet_name="Test_Summary", index=False)
 
-def plot_sequential_regression_results(df, folder="outputs", filename_prefix="sequential_fit"):
-    """
-    各 period ごとの実測値と予測値の散布図をプロット・保存します。
+    print(f"✅ 予測結果Excel保存完了: {output_excel}")
+    return df_final
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        各 period ごとの回帰結果（実測値、予測値、period を含む）
-    folder : str
-        画像の保存先フォルダ
-    filename_prefix : str
-        保存ファイル名の接頭語
-    """
-    os.makedirs(folder, exist_ok=True)
-    periods = df['period'].unique()
+# ✅ 全体評価用：平均性能などを確認しやすく
+def evaluate_sequential_model(train_results, test_results):
+    summary = {
+        "平均_Train_R2_adj": train_results["r2_adj"].mean(),
+        "平均_Train_RMSE": train_results["rmse"].mean(),
+        "平均_Test_RMSE": test_results["rmse"].mean(),
+    }
+    print("✅ モデル全体性能サマリ:")
+    for k, v in summary.items():
+        print(f"{k}: {v:.3f}")
+    return summary
 
-    for period in periods:
-        sub_df = df[df['period'] == period]
-        if sub_df.empty:
-            continue
+# ✅ プロット機能（散布図ではなく全体傾向のみ、軽量化版）
+def plot_sequential_model_results(train_results, test_results, output_dir="outputs/plots"):
+    os.makedirs(output_dir, exist_ok=True)
+    plt.figure(figsize=(10, 6))
 
-        plt.figure(figsize=(8, 6))
-        plt.scatter(sub_df["actual"], sub_df["predicted"], alpha=0.7, edgecolors='k')
-        plt.plot([sub_df["actual"].min(), sub_df["actual"].max()],
-                 [sub_df["actual"].min(), sub_df["actual"].max()],
-                 'r--', label="Ideal fit")
+    plt.plot(train_results["period"], train_results["r2_adj"], marker="o", label="Train R2_adj")
+    plt.plot(train_results["period"], train_results["rmse"], marker="s", label="Train RMSE")
+    plt.plot(test_results["period"], test_results["rmse"], marker="x", label="Test RMSE")
 
-        plt.xlabel("Actual incidence")
-        plt.ylabel("Predicted incidence")
-        plt.title(f"{period} - Actual vs Predicted")
-        plt.legend()
-        plt.grid(True)
+    plt.xticks(rotation=45)
+    plt.xlabel("Period")
+    plt.ylabel("Score")
+    plt.title("逐次型モデルの性能推移")
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
 
-        safe_period = period.replace("/", "_").replace(" ", "_")
-        file_path = os.path.join(folder, f"{filename_prefix}_{safe_period}.pdf")
-        plt.savefig(file_path, format="pdf")
-        plt.close()
-
-    print(f"✅ プロットを保存しました: {folder}")
-
+    save_path = os.path.join(output_dir, "sequential_model_performance.pdf")
+    plt.savefig(save_path, format="pdf")
+    plt.close()
+    print(f"✅ プロット保存: {save_path}")
