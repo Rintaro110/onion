@@ -2,6 +2,7 @@ import data_preprocess as dp
 import import_weatherdata as wd
 import import_diseasedata as dd
 import correlation as cor
+import os
 import pandas as pd
 import XGBoost as xgb
 import output_results as op
@@ -19,19 +20,45 @@ if __name__ == "__main__":
     end_year  = 2024
 
     period_order = [
-        "2月上旬", "2月下旬", "3月上旬", "3月下旬", "4月上旬", "4月下旬", "5月上旬", "5月下旬", "収穫日"
+        "early_February",
+        "late_February",
+        "early_March",
+        "late_March",
+        "early_April",
+        "late_April",     
+        "early_May",
+        "late_May",
+        "harvest",
+        "storage_survey"
     ]
-    target_period = "収穫日"
+    target_period = "harvest"
+    target_col = "log_incidence"
 
     # 病害データをインポート
     disease_list= dd.import_disease_data(dd_file_path, target_name, start_year, end_year)
     disease_df = pd.DataFrame(disease_list)
 
     # データ抽出
-    weather_df = wd.extract_meteorological_data(wd_file_path, start_year, end_year)
+    weather_df = wd.extract_meteorological_data(wd_file_path, start_year, end_year, lang = "en")
+    # 出力ディレクトリを作成
+    output_dir="results_it"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    # 出力ディレクトリを指定
+
     # データマージ
-    train_df, test_df = dp.preprocess_data(disease_df, weather_df, period_order, use_past_incidence=False)
-    # ad.sequential_linear_regression(merged_data, period_order, target_period, max_features=4)
+    merged_df = dp.preprocess_data(
+        disease_df, 
+        weather_df, 
+        period_order, 
+        use_past_incidence=True, 
+        output_dir=output_dir, 
+        test_years=None
+    )
+   
+    cor.analyze_and_export_correlation(merged_df, target_type="cor1", target_col=target_col,  output_path="results_it/correlation_output.xlsx")
+    # cor.analyze_and_export_correlation(merged_df, target_type="cor2", target_col=target_col,  output_path="results_it/correlation_output.xlsx")
+    """ # ad.sequential_linear_regression(merged_data, period_order, target_period, max_features=4)
     # train_result_df, test_result_df, train_all, test_all = lr.sequential_regression(train_df, test_df, target_col="incidence", periods_order=period_order, max_features=2, n_jobs=6)
     train_result_df, test_result_df, train_all, test_all = xgb.sequential_xgboost(train_df, test_df, target_col="incidence", periods_order=period_order)
     # 結果をエクスポート
@@ -40,3 +67,4 @@ if __name__ == "__main__":
     # 全体評価
     summary = op.evaluate_sequential_model(train_result_df, test_result_df)
     op.plot_sequential_model_results(train_result_df, test_result_df, output_dir="results_it")
+    """

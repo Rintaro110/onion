@@ -21,17 +21,17 @@ def import_disease_data(file_path, brand, start_year, end_year):
     data = []
 
     # C〜L列 (index 2〜11) に対応する時期ラベル
-    period_map_by_col = {
-        2: "貯蔵調査",
-        3: "収穫日",
-        4: "5月下旬",
-        5: "5月上旬",
-        6: "4月下旬",
-        7: "4月上旬",
-        8: "3月下旬",
-        9: "3月上旬",
-        10: "2月下旬",
-        11: "2月上旬"
+    period_order = {
+        2: "storage_survey",
+        3: "harvest",
+        4: "late_May",
+        5: "early_May",
+        6: "late_April",
+        7: "early_April",
+        8: "late_March",
+        9: "early_March",
+        10: "late_February",
+        11: "early_February"
     }
 
     for sheet_name in wb.sheetnames:
@@ -79,7 +79,8 @@ def import_disease_data(file_path, brand, start_year, end_year):
                     continue
 
             # 時期名を列インデックスから取得（ない場合は "不明"）
-            period_label = period_map_by_col.get(col, "不明")
+            period_label = period_order.get(col, "unknown")
+
 
             if pd.isna(value):
                 print(f"Warning: NaN value found in {period_label} {year}年 {brand} 品種")
@@ -110,6 +111,101 @@ def import_disease_data(file_path, brand, start_year, end_year):
     print("---------------------------------------------------")
 
     return data
+
+def add_incidence_cumsum(disease_df, period_order):
+    import numpy as np
+    disease_df = disease_df.copy()
+    disease_df["incidence_cumsum"] = np.nan
+
+    # periodを順序付きカテゴリ型
+    disease_df["period"] = pd.Categorical(disease_df["period"], categories=period_order, ordered=True)
+
+    for (brand, year), g in disease_df.groupby(["brand", "year"]):
+        # period順にソート
+        g_sorted = g.sort_values("period")
+        values = g_sorted["incidence"].values.astype(float)
+        idxs = g_sorted.index
+
+        # 直前までの累積和（shiftしてcumsum, 先頭はNone）
+        cumsum_shifted = np.insert(np.cumsum(np.nan_to_num(values))[:-1], 0, np.nan)
+        # 必要に応じてNaN（観測なし）はそのままNaN
+        for i, idx in enumerate(idxs):
+            if not np.isnan(values[i]):
+                disease_df.at[idx, "incidence_cumsum"] = cumsum_shifted[i]
+            else:
+                disease_df.at[idx, "incidence_cumsum"] = np.nan
+
+    return disease_df
+
+
+    # 3. period間のすべての差分を個別カラムで追加
+def add_all_incidence_diffs(disease_df, period_order):
+    disease_df = disease_df.copy()
+    all_diff_cols = []
+
+    for (brand, year), g in disease_df.groupby(["brand", "year"]):
+        g_sorted = g.set_index("period").reindex(period_order)
+        incidences = g_sorted["incidence"].astype(float).values
+
+        for idx, period in enumerate(period_order):
+            for j in range(1, idx + 1):
+                prev_p = period_order[j - 1]
+                curr_p = period_order[j]
+                diff_val = None
+                if (
+                    j < len(incidences)
+                    and not pd.isna(incidences[j])
+                    and not pd.isna(incidences[j - 1])
+                ):
+                    diff_val = incidences[j] - incidences[j - 1]
+                col_name = f"diff_{prev_p}_{curr_p}"
+                disease_df.loc[
+                    (disease_df["brand"] == brand) &
+                    (disease_df["year"] == year) &
+                    (disease_df["period"] == period), col_name
+                ] = diff_val
+                if col_name not in all_diff_cols:
+                    all_diff_cols.append(col_name)
+
+    return disease_df
+
+def add_past_period_log_actuals(disease_df, period_order, log_col="log_incidence"):
+    """
+    各period行に、それ以前のperiodのlog変換 incidence（log_incidence）を個別カラムで追加
+
+    Parameters
+    ----------
+    disease_df : pd.DataFrame
+    period_order : list[str]
+    log_col : str
+        log変換したincidenceのカラム名（例: 'log_incidence'）
+
+    Returns
+    -------
+    pd.DataFrame
+        新カラム（periodごとのlog_incidence）が付与されたDataFrame
+    """
+    if log_col not in disease_df.columns:
+        raise ValueError(f"'{log_col}' カラムがDataFrameに存在しません")
+
+    disease_df = disease_df.copy()
+    for (brand, year), g in disease_df.groupby(["brand", "year"]):
+        g_sorted = g.set_index("period").reindex(period_order)
+        log_incidences = g_sorted[log_col].astype(float)
+        for idx, period in enumerate(period_order):
+            for j in range(idx):
+                prev_p = period_order[j]
+                col_name = f"{prev_p}_{log_col}"
+                val = log_incidences[prev_p] if not pd.isna(log_incidences[prev_p]) else None
+                disease_df.loc[
+                    (disease_df["brand"] == brand) &
+                    (disease_df["year"] == year) &
+                    (disease_df["period"] == period), col_name
+                ] = val
+    return disease_df
+
+
+
 
 def save_records_to_excel(records, output_path):
     if not records:

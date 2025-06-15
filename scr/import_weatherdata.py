@@ -16,10 +16,26 @@ def save_to_excel(df, output_path):
     print(f"✅ Weather data saved to: {output_path}")
 
 
-def extract_meteorological_data(file_path, start_year, end_year):
+def extract_meteorological_data(file_path, start_year, end_year, lang="jp"):
     print("---------------------------------------------------")
     print(f"気象データを読み込み中: {file_path}")
     print(f"対象年度: {start_year}年 ～ {end_year}年")
+    print(f"出力言語: {'日本語' if lang == 'jp' else '英語'}")
+
+    # 日本語⇔英語変換辞書
+    item_jp2en = {
+        "平均気温(℃)": "mean_temp_C",
+        "最高気温(℃)": "max_temp_C",
+        "最低気温(℃)": "min_temp_C",
+        "平均湿度(％)": "mean_humidity_pct",
+        "平均蒸気圧(hPa)": "mean_vapor_pressure_hPa",
+        "平均風速(m/s)": "mean_wind_speed_mps",
+        "最大風速(m/s)": "max_wind_speed_mps",
+        "日照時間(時間)": "sunshine_duration_h",
+        "降水量の合計(mm)": "total_precip_mm"
+    }
+    # 英語→日本語（逆変換用）
+    item_en2jp = {v: k for k, v in item_jp2en.items()}
 
     wb = load_workbook(file_path, data_only=True)
     records = []
@@ -35,7 +51,6 @@ def extract_meteorological_data(file_path, start_year, end_year):
 
     # ② 対象年度ごとに処理
     for target_year in range(start_year, end_year + 1):
-        # 対応するシートを探す
         matched_sheet = None
         for sheet_name, range_start, range_end in sheet_ranges:
             if range_start <= target_year <= range_end:
@@ -60,13 +75,20 @@ def extract_meteorological_data(file_path, start_year, end_year):
             except:
                 continue
 
-            # 年度計算（12月は翌年）
             year = date.year + 1 if date.month == 12 else date.year
             if year != target_year:
                 continue
 
             for i, value in enumerate(row[1:], start=0):
-                item = item_names[i]
+                jp_item = item_names[i]
+
+                if lang == "en":
+                    item = item_jp2en.get(jp_item, jp_item)
+                elif lang == "jp":
+                    item = jp_item
+                else:
+                    raise ValueError("lang must be 'jp' or 'en'")
+
                 records.append({
                     "weather_item": item,
                     "year": year,
@@ -77,16 +99,11 @@ def extract_meteorological_data(file_path, start_year, end_year):
 
         print(f"✔ 年度 {target_year} のデータをシート '{matched_sheet}' から {count} 行取得")
 
-    # 出力・保存
     df = pd.DataFrame(records)
-    os.makedirs("results_it", exist_ok=True)
-    output_path = os.path.join("results_it", f"{start_year}to{end_year}_weather_data.xlsx")
-    save_to_excel(df, output_path)
-
     print("気象データ取得完了。")
     print("---------------------------------------------------")
-
     return df
+
 
 
 def get_weather_window_avg(df, year, obs_date, start_day, end_day):
@@ -149,17 +166,18 @@ def get_multiple_weather_period(df, year, obs_date, period):
         Dictionary of averaged weather data keyed by day range (e.g., '7days', '30days', ...)
     """
     period_day_mapping = {
-        "2月上旬": [7, 14, 30, 60],
-        "2月下旬": [7, 14, 30, 60],
-        "3月上旬": [7, 14, 30, 60, 90],
-        "3月下旬": [7, 14, 30, 60, 90],
-        "4月上旬": [7, 14, 30, 60, 90, 120],
-        "4月下旬": [7, 14, 30, 60, 90, 120],
-        "5月上旬": [7, 14, 30, 60, 90, 120, 150],
-        "5月下旬": [7, 14, 30, 60, 90, 120, 150],
-        "収穫日":  [7, 14, 30, 60, 90, 120, 150],
-        "貯蔵調査": [7, 14, 30, 60, 90, 120, 150, 180, 210, 240]
+        "early_February": [7, 14, 30, 60],
+        "late_February": [7, 14, 30, 60],
+        "early_March": [7, 14, 30, 60, 90],
+        "late_March": [7, 14, 30, 60, 90],
+        "early_April": [7, 14, 30, 60, 90, 120],
+        "late_April": [7, 14, 30, 60, 90, 120],
+        "early_May": [7, 14, 30, 60, 90, 120, 150],
+        "late_May": [7, 14, 30, 60, 90, 120, 150],
+        "harvest":  [7, 14, 30, 60, 90, 120, 150],
+        "storage_survey": [7, 14, 30, 60, 90, 120, 150, 180, 210, 240]
     }
+
 
     day_list = period_day_mapping.get(period, [7, 14, 30])
 
@@ -174,9 +192,59 @@ def get_multiple_weather_period(df, year, obs_date, period):
             end_day = days
 
         df_window = get_weather_window_avg(df, year, obs_date, start_day=start_day, end_day=end_day)
-        result[f"{end_day}days"] = df_window
+        result[f"{start_day}-{end_day}days_avg"] = df_window
 
     return result
+
+def get_weather_window_sum(df, year, obs_date, window_days):
+    """
+    Compute the sum of weather values over the N days before the observation date.
+    window_days: 7なら「観測日-7日から観測日-1日まで」。
+    """
+    start_date = obs_date - timedelta(days=window_days)
+    end_date = obs_date - timedelta(days=1)  # 観測日直前まで
+
+    subset = df[
+        (df["year"] == year) & 
+        (df["date"] >= start_date) & 
+        (df["date"] <= end_date)
+    ].copy()
+
+    result = subset.groupby("weather_item", as_index=False)["value"].sum()
+    result["year"] = year
+    result["period"] = f"{window_days}days_sum"
+    result = result[["weather_item", "year", "period", "value"]]
+
+    return result
+
+def get_multiple_weather_sum_period(df, year, obs_date, period):
+    """
+    Get weather sum (accumulation) over N days up to the observation date for each window.
+    Returns dict of DataFrames, keyed by day range.
+    """
+    period_day_mapping = {
+        "early_February": [7, 14, 30, 60],
+        "late_February": [7, 14, 30, 60],
+        "early_March": [7, 14, 30, 60, 90],
+        "late_March": [7, 14, 30, 60, 90],
+        "early_April": [7, 14, 30, 60, 90, 120],
+        "late_April": [7, 14, 30, 60, 90, 120],
+        "early_May": [7, 14, 30, 60, 90, 120, 150],
+        "late_May": [7, 14, 30, 60, 90, 120, 150],
+        "harvest":  [7, 14, 30, 60, 90, 120, 150],
+        "storage_survey": [7, 14, 30, 60, 90, 120, 150, 180, 210, 240]
+    }
+
+    day_list = period_day_mapping.get(period, [7, 14, 30])
+
+    result = {}
+    for days in day_list:
+        df_window = get_weather_window_sum(df, year, obs_date, window_days=days)
+        result[f"{days}days_sum"] = df_window
+
+    return result
+
+
 
 if __name__ == "__main__":
     file_path = "resources/meteorological_data/1990_2025_sumoto.xlsx"

@@ -2,52 +2,96 @@ from datetime import timedelta
 import pandas as pd
 import datetime
 import os 
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+# 日本語対応
+import japanize_matplotlib
 
 import import_weatherdata as wd
 import import_diseasedata as dd
 
-
-def merge_disease_and_weather(disease_df, weather_df):
+def preprocess_data(
+        disease_df, 
+        weather_df, 
+        period_order, 
+        use_past_incidence=False, 
+        output_dir="results_it",
+        test_years=None
+    ):
     """
-    Merge disease incidence data with weather features based on period-specific time windows.
-
-    Parameters
-    ----------
-    disease_df : pd.DataFrame
-        Disease incidence data (columns: brand, year, date, period, incidence)
-    weather_df : pd.DataFrame
-        Long-format weather data (columns: weather_item, year, date, value)
-    save_path : str
-        Path to save the merged Excel file
-
-    Returns
-    -------
-    pd.DataFrame
-        Merged DataFrame with disease and weather features
+    前処理段階で学習データとテストデータを分割
     """
+    print("---------------------------------------------------")
+    print("データの前処理を開始します。")
+    
 
+    if use_past_incidence:
+        disease_df = dd.add_incidence_cumsum(disease_df, period_order)
+        disease_df = dd.add_all_incidence_diffs(disease_df, period_order)
+    merged_df = merge_disease_and_weather(disease_df, weather_df, period_order, use_past_incidence)
+    cleaned_df = drop_missing_records(merged_df)
+    log_df = log_transform_target(cleaned_df, target_col="incidence", log_offset=1, new_col="log_incidence")
+    if use_past_incidence:
+        log_df = dd.add_past_period_log_actuals(log_df, period_order)
+
+    cleaned_log_df = detect_and_remove_outliers(log_df, period_order=period_order, target_col="log_incidence", output_dir="results_it/log_outlier")
+    stepwise_data = pivot_by_period(cleaned_log_df, period_order)
+
+    # 学習用・テスト用に分割
+    if test_years is not None:
+        print(f"学習データとテストデータを分割します。テスト年: {test_years}")
+        train_df = stepwise_data[~stepwise_data["year"].isin(test_years)].reset_index(drop=True)
+        test_df  = stepwise_data[stepwise_data["year"].isin(test_years)].reset_index(drop=True)
+
+        # 保存処理
+        save_merged_data_to_excel(stepwise_data, f"{output_dir}/merged_features.xlsx")
+        print(f"✅ 学習データ: {train_df.shape}, テストデータ: {test_df.shape}")
+
+        return train_df, test_df
+    
+    else:
+        print("テスト年が指定されていないため、全データを学習用として扱います。")
+        save_merged_data_to_excel(stepwise_data, f"{output_dir}/merged_features.xlsx")
+        return stepwise_data
+    
+
+def merge_disease_and_weather(disease_df, weather_df, period_order, use_past_incidence=False):
+    """
+    Merge disease incidence data with weather features (average and sum)
+    and add cumulative incidence and period-to-period difference columns.
+
+    """
     print("---------------------------------------------------")
     print("病害データと気象データのマージを開始します。")
 
+
+    # 気象データマージ
     all_records = []
 
     for _, row in disease_df.iterrows():
         year = row["year"]
         obs_date = row["date"]
-        period = row["period"]  # <- 必須
+        period = row["period"]
         record = row.to_dict()
 
-        # 欠損チェック（dateまたはperiodが欠けていたらスキップ）
         if obs_date is None or period is None:
             print(f"Skipped: year={year}, period={period}, obs_date={obs_date}")
             continue
 
-        # period に応じて day_list を取得
-        weather_windows = wd.get_multiple_weather_period(weather_df, year, obs_date, period)
-
-        # 各期間・気象項目を展開
-        for period_key, avg_df in weather_windows.items():
+        # 平均値
+        weather_windows_avg = wd.get_multiple_weather_period(weather_df, year, obs_date, period)
+        for period_key, avg_df in weather_windows_avg.items():
             for _, feat_row in avg_df.iterrows():
+                item = feat_row["weather_item"]
+                val = feat_row["value"]
+                col_name = f"{item}_{period_key}"
+                record[col_name] = val
+
+        # 積算値（sum）
+        weather_windows_sum = wd.get_multiple_weather_sum_period(weather_df, year, obs_date, period)
+        for period_key, sum_df in weather_windows_sum.items():
+            for _, feat_row in sum_df.iterrows():
                 item = feat_row["weather_item"]
                 val = feat_row["value"]
                 col_name = f"{item}_{period_key}"
@@ -57,29 +101,9 @@ def merge_disease_and_weather(disease_df, weather_df):
 
     merged_df = pd.DataFrame(all_records)
 
-
-    # 保存処理
-
     print("病害データと気象データのマージが完了しました。")
     print("---------------------------------------------------")
     return merged_df
-
-
-def save_merged_data_to_excel(df, output_path):
-    """
-    Save the merged disease and weather DataFrame to an Excel file.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The merged DataFrame from merge_disease_and_weather
-    output_path : str
-        File path to save the Excel file (e.g., 'results_it/merged_features.xlsx')
-    """
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    df.to_excel(output_path, index=False)
-    print(f"✅ Merged data saved to: {output_path}")
-
 
 def drop_missing_records(df):
     """
@@ -101,9 +125,6 @@ def drop_missing_records(df):
     # 欠損を確認する対象の重要列
     key_columns = [
         "brand", "year", "period", "date", "incidence",
-        "平均気温(℃)_7days", "平均湿度(％)_7days", "平均蒸気圧(hPa)_7days",
-        "平均風速(m/s)_7days", "日照時間(時間)_7days", "最低気温(℃)_7days",
-        "最大風速(m/s)_7days", "最高気温(℃)_7days", "降水量の合計(mm)_7days"
     ]
 
     # 欠損を含む行を抽出
@@ -123,58 +144,126 @@ def drop_missing_records(df):
 
     return cleaned_df
 
-def preprocess_data(disease_df, weather_df, period_order, use_past_incidence=False, save_path="results_it/merged_features.xlsx", test_years=[2022, 2023, 2024]):
+def log_transform_target(df, target_col="incidence", log_offset=1, new_col="log_incidence"):
     """
-    前処理段階で学習データとテストデータを分割
+    目的変数を log(x + offset) で変換し、新たなカラムで返す
+
     """
+    df = df.copy()
+    df[new_col] = np.log(df[target_col] + log_offset)
+    return df
 
-    merged_df = merge_disease_and_weather(disease_df, weather_df)
-    cleaned_df = drop_missing_records(merged_df)
-    stepwise_data = prepare_stepwise_prediction_data(cleaned_df, period_order, use_past_incidence)
+def detect_and_remove_outliers(
+    df, 
+    period_order,
+    target_col="log_incidence", 
+    output_dir="results_it/log_outlier"
+):
+    """
+    log変換済みカラムに対応し、period_order順でループ
+      - 各periodごとヒストグラム
+      - 各periodごと箱ひげ図
+      - log変換＋IQR法（上側のみ）で外れ値検出・除去
 
-    # 学習用・テスト用に分割
-    train_df = stepwise_data[~stepwise_data["year"].isin(test_years)].reset_index(drop=True)
-    test_df  = stepwise_data[stepwise_data["year"].isin(test_years)].reset_index(drop=True)
+    Parameters
+    ----------
+    df : pd.DataFrame
+    period_order : list
+        periodの順序リスト
+    target_col : str
+        対象カラム名（log変換済みカラム等）
+    by : str
+        periodカラム名
+    output_dir : str
+        グラフ保存先
 
-    # 保存処理
-    save_merged_data_to_excel(stepwise_data, save_path)
-    print(f"✅ 学習データ: {train_df.shape}, テストデータ: {test_df.shape}")
+    Returns
+    -------
+    pd.DataFrame
+        外れ値除去済みデータフレーム
+    """
+    import os
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
 
-    return train_df, test_df
+    os.makedirs(output_dir, exist_ok=True)
+    cleaned_df = df.copy()
+    outlier_years = set()
 
-
-    merge_disease_and_weather(disease_df, weather_df, save_path)
-
-
-import pandas as pd
-
-def prepare_stepwise_prediction_data(df, period_order, use_past_incidence=False):
-    print("---------------------------------------------------")
-    print("🔧 prepare_stepwise_prediction_data(): 整形＋NaN列除去処理を開始します")
-
-    df_list = []
-    for i, target_period in enumerate(period_order):
-        current_df = df[df["period"] == target_period].copy()
-        if current_df.empty:
-            print(f"⚠️ {target_period} のデータが存在しません。スキップ。")
+    # period_order順にループ
+    for period in period_order:
+        sub = df[df["period"] == period]
+        if sub.empty:
             continue
 
-        if use_past_incidence:
-            for past_period in period_order[:i]:
-                col_name = f"{past_period}_incidence"
-                past_data = df[df["period"] == past_period][["brand", "year", "incidence"]].rename(columns={"incidence": col_name})
-                current_df = current_df.merge(past_data, on=["brand", "year"], how="left")
+        # 1. 箱ひげ図（縦向き・フォント大きめ・論文サイズ）
+        plt.figure(figsize=(2.8, 4.2))  # 横幅2.8cm, 縦4.2cm（1インチ=2.54cmに換算可）
+        sns.boxplot(y=target_col, data=sub, color="lightblue", width=0.5)
+        plt.title(f"{period}", fontsize=18)
+        plt.ylabel(target_col, fontsize=18)
+        plt.xlabel("")  # x軸ラベル消す（縦向きなので不要）
+        plt.xticks(fontsize=14)
+        plt.yticks(fontsize=14)
+        plt.tight_layout(pad=0.2)
+        plt.savefig(os.path.join(output_dir, f"{period}_boxplot.pdf"), dpi=300, bbox_inches='tight')
+        plt.close()
 
-        df_list.append(current_df)
 
-    if not df_list:
-        print("❌ 全てのperiodでデータが見つからなかったため、処理を中断します。")
-        return pd.DataFrame()
+        """ # 2. ヒストグラム
+        plt.figure(figsize=(8,4))
+        sns.histplot(sub[target_col].dropna(), bins=10, kde=True, color="green")
+        plt.title(f"Histogram: {target_col} ({period})")
+        plt.xlabel(target_col)
+        plt.ylabel("Count")
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, f"{period}_histogram.png"))
+        plt.close() """
 
-    full_df = pd.concat(df_list, ignore_index=True)
+        # 3. IQR法（上側のみ）
+        vals = sub[target_col].dropna()
+        if len(vals) < 2:  # 分布が十分でない場合はスキップ
+            print(f"[{period}] データ数不足で外れ値判定をスキップしました。")
+            continue
+        q1 = np.percentile(vals, 25)
+        q3 = np.percentile(vals, 75)
+        iqr = q3 - q1
+        upper = q3 + 1.5 * iqr
+        outlier_mask = (sub[target_col] > upper)
+        outliers = sub[outlier_mask]
 
-    na_cols = full_df.columns[full_df.isna().all()].tolist()
-    cleaned_df = full_df.drop(columns=na_cols)
+        if not outliers.empty:
+            print(f"[{period}] log-IQR外れ値として除外する年度:")
+            for _, row in outliers.iterrows():
+                print(f"  year={row['year']} (brand={row['brand']}, {target_col}={row[target_col]:.3g})")
+                outlier_years.add((row['year'], row['brand'], period))
+        else:
+            print(f"[{period}] 外れ値は見つかりませんでした。")
+
+        # 4. 外れ値を除去
+        for _, row in outliers.iterrows():
+            mask = (
+                (cleaned_df["year"] == row["year"]) &
+                (cleaned_df["brand"] == row["brand"]) &
+                (cleaned_df["period"] == period)
+            )
+            cleaned_df = cleaned_df[~mask]
+
+    print(f"===> 外れ値除外後のデータサイズ: {cleaned_df.shape}")
+    return cleaned_df
+
+def pivot_by_period(df, period_order):
+    print("---------------------------------------------------")
+    print("🔧 pivot_by_period(): 整形＋NaN列除去処理を開始します")
+
+    df = df.copy()
+    # periodをカテゴリ型にして順序を明示
+    df["period"] = pd.Categorical(df["period"], categories=period_order, ordered=True)
+    # ブランド→period_order→yearの順で並べる
+    df = df.sort_values(["brand", "period", "year"]).reset_index(drop=True)
+
+    na_cols = df.columns[df.isna().all()].tolist()
+    cleaned_df = df.drop(columns=na_cols)
 
     print(f"✅ 完成データサイズ: {cleaned_df.shape}")
     if na_cols:
@@ -183,13 +272,23 @@ def prepare_stepwise_prediction_data(df, period_order, use_past_incidence=False)
             print(f"  - {col}")
     else:
         print("✅ 全ての列に有効なデータが存在しています。")
-
     print("---------------------------------------------------")
-    
     return cleaned_df
 
+def save_merged_data_to_excel(df, output_path):
+    """
+    Save the merged disease and weather DataFrame to an Excel file.
 
-
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The merged DataFrame from merge_disease_and_weather
+    output_path : str
+        File path to save the Excel file (e.g., 'results_it/merged_features.xlsx')
+    """
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    df.to_excel(output_path, index=False)
+    print(f"✅ Merged data saved to: {output_path}")
 
 
 if __name__ == "__main__":
@@ -216,3 +315,4 @@ if __name__ == "__main__":
     merged_data = preprocess_data(disease_df, weather_df, period_order)
     print(merged_data)
     
+
