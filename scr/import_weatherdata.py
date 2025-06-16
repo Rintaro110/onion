@@ -24,15 +24,15 @@ def extract_meteorological_data(file_path, start_year, end_year, lang="jp"):
 
     # 日本語⇔英語変換辞書
     item_jp2en = {
-        "平均気温(℃)": "mean_temp_C",
-        "最高気温(℃)": "max_temp_C",
-        "最低気温(℃)": "min_temp_C",
-        "平均湿度(％)": "mean_humidity_pct",
-        "平均蒸気圧(hPa)": "mean_vapor_pressure_hPa",
-        "平均風速(m/s)": "mean_wind_speed_mps",
-        "最大風速(m/s)": "max_wind_speed_mps",
-        "日照時間(時間)": "sunshine_duration_h",
-        "降水量の合計(mm)": "total_precip_mm"
+        "平均気温(℃)": "mean_temp",
+        "最高気温(℃)": "max_temp",
+        "最低気温(℃)": "min_temp",
+        "平均湿度(％)": "mean_humidity",
+        "平均蒸気圧(hPa)": "mean_vapor_pressure",
+        "平均風速(m/s)": "mean_wind_speed",
+        "最大風速(m/s)": "max_wind_speed",
+        "日照時間(時間)": "sunshine_duration",
+        "降水量の合計(mm)": "total_precip"
     }
     # 英語→日本語（逆変換用）
     item_en2jp = {v: k for k, v in item_jp2en.items()}

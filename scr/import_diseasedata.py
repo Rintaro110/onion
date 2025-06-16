@@ -112,40 +112,46 @@ def import_disease_data(file_path, brand, start_year, end_year):
 
     return data
 
-def add_incidence_cumsum(disease_df, period_order):
+def add_log_incidence_cumsum(disease_df, period_order, log_col="log_incidence", cumsum_col="log_incidence_cumsum"):
     import numpy as np
     disease_df = disease_df.copy()
-    disease_df["incidence_cumsum"] = np.nan
+    disease_df[cumsum_col] = np.nan
 
-    # periodを順序付きカテゴリ型
     disease_df["period"] = pd.Categorical(disease_df["period"], categories=period_order, ordered=True)
 
     for (brand, year), g in disease_df.groupby(["brand", "year"]):
-        # period順にソート
         g_sorted = g.sort_values("period")
-        values = g_sorted["incidence"].values.astype(float)
+        values = g_sorted[log_col].values.astype(float)
         idxs = g_sorted.index
 
-        # 直前までの累積和（shiftしてcumsum, 先頭はNone）
-        cumsum_shifted = np.insert(np.cumsum(np.nan_to_num(values))[:-1], 0, np.nan)
-        # 必要に応じてNaN（観測なし）はそのままNaN
-        for i, idx in enumerate(idxs):
-            if not np.isnan(values[i]):
-                disease_df.at[idx, "incidence_cumsum"] = cumsum_shifted[i]
+        cumsum_shifted = []
+        running_total = 0.0
+        encountered_nan = False
+
+        for i, v in enumerate(values):
+            if i == 0:
+                cumsum_shifted.append(np.nan)
+            elif encountered_nan:
+                cumsum_shifted.append(np.nan)
+            elif np.isnan(values[i - 1]):
+                cumsum_shifted.append(np.nan)
+                encountered_nan = True
             else:
-                disease_df.at[idx, "incidence_cumsum"] = np.nan
+                running_total += values[i - 1]
+                cumsum_shifted.append(running_total)
+
+        for i, idx in enumerate(idxs):
+            disease_df.at[idx, cumsum_col] = cumsum_shifted[i]
 
     return disease_df
 
-
-    # 3. period間のすべての差分を個別カラムで追加
-def add_all_incidence_diffs(disease_df, period_order):
+def add_all_log_incidence_diffs(disease_df, period_order, log_col="log_incidence"):
     disease_df = disease_df.copy()
     all_diff_cols = []
 
     for (brand, year), g in disease_df.groupby(["brand", "year"]):
         g_sorted = g.set_index("period").reindex(period_order)
-        incidences = g_sorted["incidence"].astype(float).values
+        log_incidences = g_sorted[log_col].astype(float).values
 
         for idx, period in enumerate(period_order):
             for j in range(1, idx + 1):
@@ -153,12 +159,12 @@ def add_all_incidence_diffs(disease_df, period_order):
                 curr_p = period_order[j]
                 diff_val = None
                 if (
-                    j < len(incidences)
-                    and not pd.isna(incidences[j])
-                    and not pd.isna(incidences[j - 1])
+                    j < len(log_incidences)
+                    and not pd.isna(log_incidences[j])
+                    and not pd.isna(log_incidences[j - 1])
                 ):
-                    diff_val = incidences[j] - incidences[j - 1]
-                col_name = f"diff_{prev_p}_{curr_p}"
+                    diff_val = log_incidences[j] - log_incidences[j - 1]
+                col_name = f"log_diff_{prev_p}_{curr_p}"
                 disease_df.loc[
                     (disease_df["brand"] == brand) &
                     (disease_df["year"] == year) &
@@ -168,6 +174,7 @@ def add_all_incidence_diffs(disease_df, period_order):
                     all_diff_cols.append(col_name)
 
     return disease_df
+
 
 def add_past_period_log_actuals(disease_df, period_order, log_col="log_incidence"):
     """
@@ -217,21 +224,31 @@ def save_records_to_excel(records, output_path):
     df.to_excel(output_path, index=False)
     print(f"データを {output_path} に保存しました（{len(df)} 件）。")
 
-
-def plot_disease_trends_by_year(data, target_name="ターザン", output_dir=None, show=True):
+def plot_disease_trends_by_year(
+    data, 
+    target_name="ターザン", 
+    output_dir=None, 
+    show=True, 
+    log=False, 
+    log_col="log_incidence"
+):
     """
     Plot disease incidence trends by year for a specific variety, using MM-DD observation dates.
 
     Parameters
     ----------
     data : list of dict
-        Output from import_disease_data(), containing keys like brand, year, date, period, incidence.
+        Output from import_disease_data(), containing keys like brand, year, date, period, incidence, log_incidence.
     target_name : str
         Target variety name (default: "ターザン").
     output_dir : str or None
         Directory to save the plot. If None, the plot is not saved.
     show : bool
         If True, the plot is displayed (default: True).
+    log : bool
+        If True, plot log-transformed values (default: False).
+    log_col : str
+        Column name for log-transformed incidence (default: "log_incidence").
     """
 
     # リスト→DataFrame
@@ -243,19 +260,22 @@ def plot_disease_trends_by_year(data, target_name="ターザン", output_dir=Non
         print(f"No data found for variety '{target_name}'.")
         return
 
-    # incidence 欠損を除外
-    df = df[df["incidence"].notna()]
+    # 使用するカラムを決定
+    y_col = log_col if log else "incidence"
+
+    # 欠損除外
+    df = df[df[y_col].notna()]
 
     # date列を 2000年のダミー日付に変換（x軸用）
     df['date_dt'] = pd.to_datetime(df['date'].apply(lambda d: f"2000-{d.month:02d}-{d.day:02d}"))
 
     # プロット
     plt.figure(figsize=(10, 10))
-    sns.lineplot(data=df, x='date_dt', y='incidence', hue='year', marker='o', palette='tab20')
+    sns.lineplot(data=df, x='date_dt', y=y_col, hue='year', marker='o', palette='tab20')
 
-    plt.title(f"Disease incidence trends of {target_name}", fontsize=14)
+    plt.title(f"{'Log-' if log else ''}Disease incidence trends of {target_name}", fontsize=14)
     plt.xlabel("Observation date (MM-DD)")
-    plt.ylabel("Incidence rate")
+    plt.ylabel("Log incidence rate" if log else "Incidence rate")
 
     plt.gca().xaxis.set_major_formatter(DateFormatter("%m-%d"))
     plt.xticks(rotation=45)
@@ -266,7 +286,8 @@ def plot_disease_trends_by_year(data, target_name="ターザン", output_dir=Non
     # 保存
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f"{target_name}_incidence_trends.png")
+        suffix = "log" if log else "raw"
+        output_path = os.path.join(output_dir, f"{target_name}_incidence_trends_{suffix}.png")
         plt.savefig(output_path, dpi=300)
         print(f"Plot saved to: {output_path}")
 
@@ -274,6 +295,7 @@ def plot_disease_trends_by_year(data, target_name="ターザン", output_dir=Non
         plt.show()
     else:
         plt.close()
+
 
 if __name__ == '__main__':
 

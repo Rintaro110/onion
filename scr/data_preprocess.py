@@ -5,8 +5,8 @@ import os
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-# 日本語対応
 import japanize_matplotlib
+
 
 import import_weatherdata as wd
 import import_diseasedata as dd
@@ -16,6 +16,7 @@ def preprocess_data(
         weather_df, 
         period_order, 
         use_past_incidence=False, 
+        remove_outliers=False,
         output_dir="results_it",
         test_years=None
     ):
@@ -26,16 +27,15 @@ def preprocess_data(
     print("データの前処理を開始します。")
     
 
-    if use_past_incidence:
-        disease_df = dd.add_incidence_cumsum(disease_df, period_order)
-        disease_df = dd.add_all_incidence_diffs(disease_df, period_order)
-    merged_df = merge_disease_and_weather(disease_df, weather_df, period_order, use_past_incidence)
+    merged_df = merge_disease_and_weather(disease_df, weather_df)
     cleaned_df = drop_missing_records(merged_df)
     log_df = log_transform_target(cleaned_df, target_col="incidence", log_offset=1, new_col="log_incidence")
     if use_past_incidence:
-        log_df = dd.add_past_period_log_actuals(log_df, period_order)
+        log_df_a = dd.add_log_incidence_cumsum(log_df, period_order)
+        log_df_b = dd.add_all_log_incidence_diffs(log_df_a, period_order)
+        log_df = dd.add_past_period_log_actuals(log_df_b, period_order)
 
-    cleaned_log_df = detect_and_remove_outliers(log_df, period_order=period_order, target_col="log_incidence", output_dir="results_it/log_outlier")
+    cleaned_log_df = detect_and_remove_outliers(log_df, period_order=period_order, target_col="log_incidence", output_dir=f"{output_dir}/boxplot", remove_outliers=remove_outliers)
     stepwise_data = pivot_by_period(cleaned_log_df, period_order)
 
     # 学習用・テスト用に分割
@@ -56,7 +56,7 @@ def preprocess_data(
         return stepwise_data
     
 
-def merge_disease_and_weather(disease_df, weather_df, period_order, use_past_incidence=False):
+def merge_disease_and_weather(disease_df, weather_df):
     """
     Merge disease incidence data with weather features (average and sum)
     and add cumulative incidence and period-to-period difference columns.
@@ -146,24 +146,30 @@ def drop_missing_records(df):
 
 def log_transform_target(df, target_col="incidence", log_offset=1, new_col="log_incidence"):
     """
-    目的変数を log(x + offset) で変換し、新たなカラムで返す
-
+    目的変数を log(x + offset) で変換し、新たなカラムを target_col の隣に挿入して返す。
     """
     df = df.copy()
-    df[new_col] = np.log(df[target_col] + log_offset)
+    log_values = np.log(df[target_col] + log_offset)
+
+    # 挿入位置を取得
+    target_index = df.columns.get_loc(target_col)
+    
+    # 挿入
+    df.insert(loc=target_index + 1, column=new_col, value=log_values)
+
     return df
 
 def detect_and_remove_outliers(
     df, 
     period_order,
     target_col="log_incidence", 
-    output_dir="results_it/log_outlier"
+    output_dir="results_it/outlier",
+    remove_outliers=True
 ):
     """
     log変換済みカラムに対応し、period_order順でループ
-      - 各periodごとヒストグラム
-      - 各periodごと箱ひげ図
-      - log変換＋IQR法（上側のみ）で外れ値検出・除去
+      - 各periodごとに箱ひげ図を作成
+      - IQR法（上側のみ）で外れ値検出・除去（任意）
 
     Parameters
     ----------
@@ -172,82 +178,74 @@ def detect_and_remove_outliers(
         periodの順序リスト
     target_col : str
         対象カラム名（log変換済みカラム等）
-    by : str
-        periodカラム名
     output_dir : str
         グラフ保存先
+    remove_outliers : bool
+        Trueなら外れ値を除去して箱ひげ図を描画、Falseなら元データで描画する
 
     Returns
     -------
     pd.DataFrame
-        外れ値除去済みデータフレーム
+        外れ値除去済みまたは元データのコピー
     """
-    import os
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import seaborn as sns
 
     os.makedirs(output_dir, exist_ok=True)
     cleaned_df = df.copy()
     outlier_years = set()
 
-    # period_order順にループ
     for period in period_order:
         sub = df[df["period"] == period]
         if sub.empty:
             continue
 
-        # 1. 箱ひげ図（縦向き・フォント大きめ・論文サイズ）
-        plt.figure(figsize=(2.8, 4.2))  # 横幅2.8cm, 縦4.2cm（1インチ=2.54cmに換算可）
-        sns.boxplot(y=target_col, data=sub, color="lightblue", width=0.5)
+        # 1. IQR法（上側のみ）で外れ値を検出（削除するかは remove_outliers で判定）
+        vals = sub[target_col].dropna()
+        if len(vals) < 2:
+            print(f"[{period}] データ数不足で外れ値判定をスキップしました。")
+            plot_df = sub
+        else:
+            q1 = np.percentile(vals, 25)
+            q3 = np.percentile(vals, 75)
+            iqr = q3 - q1
+            upper = q3 + 1.5 * iqr
+            outlier_mask = (sub[target_col] > upper)
+            outliers = sub[outlier_mask]
+
+            if not outliers.empty:
+                print(f"[{period}] log-IQR外れ値として検出された年度:")
+                for _, row in outliers.iterrows():
+                    print(f"  year={row['year']} (brand={row['brand']}, {target_col}={row[target_col]:.3g})")
+                    outlier_years.update([(row['year'], row['brand'], period)])
+            else:
+                print(f"[{period}] 外れ値は見つかりませんでした。")
+
+            # 外れ値を除くかどうかに応じて使用するデータを決定
+            if remove_outliers:
+                plot_df = sub[~outlier_mask]
+                # 全体のクリーンデータからも除去
+                for _, row in outliers.iterrows():
+                    mask = (
+                        (cleaned_df["year"] == row["year"]) &
+                        (cleaned_df["brand"] == row["brand"]) &
+                        (cleaned_df["period"] == period)
+                    )
+                    cleaned_df = cleaned_df[~mask]
+            else:
+                plot_df = sub
+
+        # 2. 箱ひげ図の描画（除外あり／なしに応じて）
+        plt.figure(figsize=(2.8, 4.2))
+        sns.boxplot(y=target_col, data=plot_df, color="lightblue", width=0.5)
         plt.title(f"{period}", fontsize=18)
         plt.ylabel(target_col, fontsize=18)
-        plt.xlabel("")  # x軸ラベル消す（縦向きなので不要）
+        plt.xlabel("")
         plt.xticks(fontsize=14)
         plt.yticks(fontsize=14)
         plt.tight_layout(pad=0.2)
-        plt.savefig(os.path.join(output_dir, f"{period}_boxplot.pdf"), dpi=300, bbox_inches='tight')
+
+        suffix = "_removed" if remove_outliers else "_raw"
+        plt.savefig(os.path.join(output_dir, f"{period}_boxplot{suffix}.pdf"), dpi=300, bbox_inches='tight')
         plt.close()
-
-
-        """ # 2. ヒストグラム
-        plt.figure(figsize=(8,4))
-        sns.histplot(sub[target_col].dropna(), bins=10, kde=True, color="green")
-        plt.title(f"Histogram: {target_col} ({period})")
-        plt.xlabel(target_col)
-        plt.ylabel("Count")
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, f"{period}_histogram.png"))
-        plt.close() """
-
-        # 3. IQR法（上側のみ）
-        vals = sub[target_col].dropna()
-        if len(vals) < 2:  # 分布が十分でない場合はスキップ
-            print(f"[{period}] データ数不足で外れ値判定をスキップしました。")
-            continue
-        q1 = np.percentile(vals, 25)
-        q3 = np.percentile(vals, 75)
-        iqr = q3 - q1
-        upper = q3 + 1.5 * iqr
-        outlier_mask = (sub[target_col] > upper)
-        outliers = sub[outlier_mask]
-
-        if not outliers.empty:
-            print(f"[{period}] log-IQR外れ値として除外する年度:")
-            for _, row in outliers.iterrows():
-                print(f"  year={row['year']} (brand={row['brand']}, {target_col}={row[target_col]:.3g})")
-                outlier_years.add((row['year'], row['brand'], period))
-        else:
-            print(f"[{period}] 外れ値は見つかりませんでした。")
-
-        # 4. 外れ値を除去
-        for _, row in outliers.iterrows():
-            mask = (
-                (cleaned_df["year"] == row["year"]) &
-                (cleaned_df["brand"] == row["brand"]) &
-                (cleaned_df["period"] == period)
-            )
-            cleaned_df = cleaned_df[~mask]
 
     print(f"===> 外れ値除外後のデータサイズ: {cleaned_df.shape}")
     return cleaned_df

@@ -7,6 +7,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.exceptions import ConvergenceWarning
 from multiprocessing import cpu_count
 import warnings
+from sklearn.metrics import r2_score
 
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 warnings.filterwarnings("ignore", message="divide by zero encountered in scalar divide")
@@ -39,7 +40,7 @@ def drop_constant_features(X, threshold=1e-10):
         print(f"⚠️ 定数特徴量を除去: {drop_cols}")
     return X.drop(columns=drop_cols, errors='ignore')
 
-def select_features_by_shap(model, X_train, cumulative_cut=0.85):
+def select_features_by_shap(model, X_train, cumulative_cut=0.90):
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_train)
     mean_shap = np.abs(shap_values).mean(axis=0)
@@ -61,6 +62,13 @@ def select_features_by_rfe(X_train, y_train, n_features=None):
     selected = list(X_train.columns[selector.support_])
     print(f"🖊️ RFE Selected: {selected}")
     return selected
+
+def adjusted_r2(y_true, y_pred, n_features):
+    n = len(y_true)
+    r2 = r2_score(y_true, y_pred)
+    if n <= n_features + 1:
+        return np.nan
+    return 1 - (1 - r2) * (n - 1) / (n - n_features - 1)
 
 def sequential_xgboost(train_df, test_df, target_col="incidence", periods_order=None, n_jobs=None):
     if periods_order is None:
@@ -149,8 +157,26 @@ def sequential_xgboost(train_df, test_df, target_col="incidence", periods_order=
 
         train_rmse = np.sqrt(np.mean((y_train - y_train_pred) ** 2))
         test_rmse = np.sqrt(np.mean((y_test - y_test_pred) ** 2))
-        train_results.append({"period": period, "rmse": train_rmse, "features": list(X_train_raw.columns)})
-        test_results.append({"period": period, "rmse": test_rmse})
+        # R2計算
+        if len(y_train) > 1:
+            train_r2 = r2_score(y_train, y_train_pred)
+            n_features = X_train_raw.shape[1]
+            train_r2_adj = adjusted_r2(y_train, y_train_pred, n_features)
+        else:
+            train_r2 = np.nan
+            train_r2_adj = np.nan
+
+        train_results.append({
+            "period": period,
+            "rmse": train_rmse,
+            "r2": train_r2,
+            "r2_adj": train_r2_adj,
+            "features": list(X_train_raw.columns)
+        })
+        test_results.append({
+            "period": period,
+            "rmse": test_rmse
+        })
 
         print(f"✅ Train RMSE={train_rmse:.3f}, Test RMSE={test_rmse:.3f}")
 
