@@ -43,7 +43,7 @@ if __name__ == "__main__":
     # データ抽出
     weather_df = wd.extract_meteorological_data(wd_file_path, start_year, end_year, lang = "en")
     # 出力ディレクトリを作成
-    output_dir="results_xgboost"
+    output_dir="results_linear_regression_1"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     # 出力ディレクトリを指定
@@ -64,7 +64,7 @@ if __name__ == "__main__":
         disease_df, 
         weather_df, 
         period_order, 
-        use_past_incidence=True, 
+        use_past_incidence=False, 
         remove_outliers=False,
         output_dir=output_dir,
         test_years= [2022, 2023, 2024]  # モデル評価用のテストデータ年を指定
@@ -86,12 +86,12 @@ if __name__ == "__main__":
     
     # modeling
     # 線形回帰モデルの実行
-    # train_result_df, test_result_df, train_all, test_all = lr.sequential_regression(train_df, test_df, target_col="incidence", periods_order=period_order, max_features=2, n_jobs=6)
-    # xgboostモデルの実行
-    train_result_df, test_result_df, train_all, test_all = xgb.sequential_xgboost(train_df, test_df, target_col="log_incidence", periods_order=period_order)
+    train_result_df, test_result_df, train_all, test_all = lr.sequential_regression(train_df, test_df, target_col="log_incidence", periods_order=period_order, max_features=4, n_jobs=8)
     # 結果をエクスポート
-    df_final = op.save_sequential_results(train_result_df, test_result_df, train_all, test_all, output_excel=f"results_xgboost/sequential_xgboost_results.xlsx")
+    op.save_results(train_result_df, test_result_df, train_all, test_all, output_dir=output_dir) 
 
-    # 全体評価
-    summary = op.evaluate_sequential_model(train_result_df, test_result_df)
-    op.plot_sequential_model_results(train_result_df, test_result_df, output_dir="results_xgboost")
+    # --------------------------------------
+    # xgboostモデルの実行
+    """ train_result_df, test_result_df, train_all, test_all = xgb.sequential_xgboost(train_df, test_df, target_col="log_incidence", periods_order=period_order)
+    # 結果をエクスポート
+    op.save_results(train_result_df, test_result_df, train_all, test_all, output_dir=output_dir) """  

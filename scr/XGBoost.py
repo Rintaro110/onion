@@ -8,6 +8,7 @@ from sklearn.exceptions import ConvergenceWarning
 from multiprocessing import cpu_count
 import warnings
 from sklearn.metrics import r2_score
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 warnings.filterwarnings("ignore", message="divide by zero encountered in scalar divide")
@@ -33,6 +34,27 @@ def select_features_by_rfecv(X, y, model=None, min_features_to_select=1, cv_spli
     print(f"🖊️ RFECV Selected: {selected}（最適特徴数: {len(selected)}）")
     return selected
 
+def select_features_by_vif(X, threshold=10.0):
+    """
+    多重共線性を示す特徴量（VIF>threshold）を除外する
+    """
+    X_ = X.copy()
+    dropped = True
+    while dropped and X_.shape[1] > 1:
+        dropped = False
+        vif = pd.Series(
+            [variance_inflation_factor(X_.values, i) for i in range(X_.shape[1])],
+            index=X_.columns
+        )
+        max_vif = vif.max()
+        if max_vif > threshold:
+            drop_col = vif.idxmax()
+            print(f"⚠️ VIF>={threshold:.1f} ({max_vif:.2f}): {drop_col} を除去")
+            X_ = X_.drop(columns=[drop_col])
+            dropped = True
+    selected = list(X_.columns)
+    print(f"🖊️ VIFカット後: {selected}")
+    return selected
 
 def drop_constant_features(X, threshold=1e-10):
     drop_cols = [col for col in X.columns if X[col].std() < threshold]
@@ -40,7 +62,7 @@ def drop_constant_features(X, threshold=1e-10):
         print(f"⚠️ 定数特徴量を除去: {drop_cols}")
     return X.drop(columns=drop_cols, errors='ignore')
 
-def select_features_by_shap(model, X_train, cumulative_cut=0.90):
+def select_features_by_shap(model, X_train, cumulative_cut=0.80):
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_train)
     mean_shap = np.abs(shap_values).mean(axis=0)
@@ -70,12 +92,22 @@ def adjusted_r2(y_true, y_pred, n_features):
         return np.nan
     return 1 - (1 - r2) * (n - 1) / (n - n_features - 1)
 
+def my_r2_score(y_true, y_pred):
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    # データの分散が0の場合はnanを返す
+    if ss_tot == 0:
+        return np.nan
+    return 1 - ss_res / ss_tot
+
 def sequential_xgboost(train_df, test_df, target_col="incidence", periods_order=None, n_jobs=None):
     if periods_order is None:
         periods_order = train_df["period"].unique()
 
     train_all, test_all = train_df.copy(), test_df.copy()
-    meta_cols = ["brand", "year", "period", "date"]
+    meta_cols = ["index","brand", "year", "period", "date", "log_incidence", "incidence"]
     train_results, test_results = [], []
 
     if n_jobs is None:
@@ -126,19 +158,20 @@ def sequential_xgboost(train_df, test_df, target_col="incidence", periods_order=
             model.fit(X_train_clean, y_train_clean)
 
             shap_selected = select_features_by_shap(model, X_train_clean)
-            X_rfe = X_train_clean[shap_selected]
-            # rfe_selected = select_features_by_rfe(X_rfe, y_train_clean, n_features=int(len(X_rfe.columns)*0.6))
-            # rfe_selected = select_features_by_rfecv(X_rfe, y_train_clean, model=model, min_features_to_select=1, cv_splits=3)
-    
-            # 再学習
-            # model.fit(X_rfe[rfe_selected], y_train_clean)
-            model.fit(X_rfe, y_train_clean)
-            rfe_selected = X_rfe.columns.tolist()  # SHAPで選ばれた特徴量をそのまま使う
+            X_rfecv = X_train_clean[shap_selected]
+            rfecv_selected = select_features_by_rfecv(X_rfecv, y_train_clean)
+            X_vif = X_rfecv[rfecv_selected]
+            vif_selected = select_features_by_vif(X_vif)
+            final_selected = vif_selected
+            X_final = X_vif[final_selected]
+
+            model.fit(X_final, y_train_clean)
+            rfe_selected = X_final.columns.tolist()  # SHAPで選ばれた特徴量をそのまま使う
 
             # [1] train_allに、**全indexで予測値**を伝播
             all_train_X = train_all.drop(columns=meta_cols+[target_col], errors="ignore")
             for feat in rfe_selected:
-                fill_val = X_rfe[feat].mean()
+                fill_val = X_final[feat].mean()
                 all_train_X[feat] = all_train_X[feat].fillna(fill_val)
             all_train_X = all_train_X.reindex(columns=rfe_selected)
             train_all[f"{period}_pred"] = model.predict(all_train_X)
@@ -146,7 +179,7 @@ def sequential_xgboost(train_df, test_df, target_col="incidence", periods_order=
             # [2] test_allに、**全indexで予測値**を伝播
             all_test_X = test_all.drop(columns=meta_cols+[target_col], errors="ignore")
             for feat in rfe_selected:
-                fill_val = X_rfe[feat].mean()
+                fill_val = X_final[feat].mean()
                 all_test_X[feat] = all_test_X[feat].fillna(fill_val)
             all_test_X = all_test_X.reindex(columns=rfe_selected)
             test_all[f"{period}_pred"] = model.predict(all_test_X)
@@ -159,8 +192,8 @@ def sequential_xgboost(train_df, test_df, target_col="incidence", periods_order=
         test_rmse = np.sqrt(np.mean((y_test - y_test_pred) ** 2))
         # R2計算
         if len(y_train) > 1:
-            train_r2 = r2_score(y_train, y_train_pred)
-            n_features = X_train_raw.shape[1]
+            train_r2 = my_r2_score(y_train, y_train_pred)
+            n_features = len(rfe_selected) if rfe_selected is not None else 0
             train_r2_adj = adjusted_r2(y_train, y_train_pred, n_features)
         else:
             train_r2 = np.nan
@@ -171,13 +204,14 @@ def sequential_xgboost(train_df, test_df, target_col="incidence", periods_order=
             "rmse": train_rmse,
             "r2": train_r2,
             "r2_adj": train_r2_adj,
-            "features": list(X_train_raw.columns)
+            "features": rfe_selected,
+            "model": model
         })
         test_results.append({
             "period": period,
             "rmse": test_rmse
         })
 
-        print(f"✅ Train RMSE={train_rmse:.3f}, Test RMSE={test_rmse:.3f}")
+        print(f"✅ Train RMSE={train_rmse:.3f}, Test RMSE={test_rmse:.3f}, R2={train_r2:.3f}, R2_adj={train_r2_adj:.3f}")
 
     return pd.DataFrame(train_results), pd.DataFrame(test_results), train_all, test_all
