@@ -86,7 +86,7 @@ if __name__ == "__main__":
     
     # modeling
     # 線形回帰モデルの実行
-    train_result_df, test_result_df, train_all, test_all = lr.sequential_regression(train_df, test_df, target_col="log_incidence", periods_order=period_order, max_features=4, n_jobs=8)
+    train_result_df, test_result_df, train_all, test_all = lr.sequential_regression(train_df, test_df, target_col="log_incidence", periods_order=period_order, max_features=3, n_jobs=8)
     # 結果をエクスポート
     op.save_results(train_result_df, test_result_df, train_all, test_all, output_dir=output_dir) 
 
